@@ -1,7 +1,19 @@
 const TCS_VERSION = "6.9.2";
 const TCS_SERIES  = "8";
-const TCS_BUILD   = "15";
-
+const TCS_BUILD   = "16";
+const needsDOM = [
+  "changeBodyCSS", "query", "setText", "setHTML", "setValue", "setStyle", 
+  "show", "hide", "changePageTitle", "runHyperTextMarkupLanguage", "getValue", "changeTitle", 
+  "openLink", "reloadPage", "copyToClipboard", "requstCurrentLoctationClosing"
+];
+const needsStorage = ["saveData", "loadData", "deleteData", "wipeAllCurrentWebsiteData", "wipeTCSData"];
+const needsSystem = [
+  "getUserAgent", "getUserInfo", "now", "getYear", "getMonth", "getDay", 
+  "getHours", "sleep", "wait", "alert", "prompt", "confirm", "getFullDate"
+];
+const needsNetwork = ["fetchText", "fetchFn", "fetchTCSFn", "XTHttpsRequest", "fetchJSON", "ws_connect", "ws_send", "ws_close"];
+const js = ["callJS", "javaScriptRunCodeAsText"];
+const needsCFN = [];
 const tcs = {
   version: "TCS_JS_" + TCS_SERIES,
   full_version: TCS_VERSION,
@@ -1452,20 +1464,7 @@ async function evalExpr(node, env) {
     case "Call": {
       const name = node.callee.type === "Ident" ? node.callee.name : null;
       const args = await Promise.all(node.args.map(a => evalExpr(a, env)));
-      
-      const needsDOM = [
-        "changeBodyCSS", "query", "setText", "setHTML", "setValue", "setStyle", 
-        "show", "hide", "changePageTitle", "runHyperTextMarkupLanguage", "getValue", "changeTitle", 
-        "openLink", "reloadPage", "copyToClipboard", "requstCurrentLoctationClosing"
-      ];
-      const needsStorage = ["saveData", "loadData", "deleteData", "wipeAllCurrentWebsiteData", "wipeTCSData"];
-      const needsSystem = [
-        "getUserAgent", "getUserInfo", "now", "getYear", "getMonth", "getDay", 
-        "getHours", "sleep", "wait", "alert", "prompt", "confirm", "getFullDate"
-      ];
-      const needsNetwork = ["fetchText", "fetchFn", "fetchTCSFn", "XTHttpsRequest", "fetchJSON", "ws_connect", "ws_send", "ws_close"];  
- const js = ["callJS", "javaScriptRunCodeAsText"];
- const needsCFN = [];
+  
  if (name && TCS_PERMS.blacklist.includes(name)) {
         throw new Error("Security Error: '" + name + "' is blocked by the host.");
       }
