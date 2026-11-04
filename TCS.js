@@ -1,6 +1,6 @@
 const TCS_VERSION = "6.9.2";
-const TCS_SERIES  = "6";
-const TCS_BUILD   = "12";
+const TCS_SERIES  = "8";
+const TCS_BUILD   = "15";
 
 const tcs = {
   version: "TCS_JS_" + TCS_SERIES,
@@ -196,7 +196,9 @@ function parse(tokens) {
     if (at("WORD", "while")) return parseWhile();
     if (at("WORD", "until")) {
   eat();
+  expect("OP", "(");
   const cond = parseExpression();
+  expect("OP", ")");
   expect("OP", "{");
   const body = parseBlock();
   expect("OP", "}");
@@ -542,7 +544,7 @@ class Env {
 }
 
 const FUNCS = {};
-let TCS_PERMS = { dom: false, storage: false, system: false, js: false, network: false };
+let TCS_PERMS = { dom: false, storage: false, system: false, js: false, network: false, cfn: false,blacklist: [] };
 const TCS_SOCKETS = {};
 
 
@@ -910,7 +912,7 @@ FUNCS.deleteData = function(key) {
     localStorage.removeItem("tcs_" + key);
     return 0;
 };
-FUNCS.wipe = function() { localStorage.clear(); return 0; };
+FUNCS.wipeAllCurrentWebsiteData = function() { localStorage.clear(); return 0; };
 FUNCS.wipeTCSData = function() {
     const keys = Object.keys(localStorage);
     for (let i = 0; i < keys.length; i++) {
@@ -1076,9 +1078,9 @@ FUNCS.callJS = function(fnName, ...args) {
     if (typeof globalThis[fnName] === "function") return globalThis[fnName](...args);
     throw new Error("callJS: JavaScript function '" + fnName + "' not found");
 };
-FUNCS.javaScriptEval = function(text) {
-    if (!TCS_PERMS.js) throw new Error("Security Error: javaScriptEval requires 'js' permission");
-    if (typeof text !== "string") throw new Error("javaScriptEval: expected a string");
+FUNCS.javaScriptRunCodeAsText = function(text) {
+    if (!TCS_PERMS.js) throw new Error("Security Error: javaScriptRunCodeAsText requires 'js' permission");
+    if (typeof text !== "string") throw new Error("javaScriptRunCodeAsText: expected a string");
     return eval(text);
 };
 FUNCS.getGlobal = function(name) {
@@ -1096,6 +1098,15 @@ FUNCS.setGlobal = function(name, value) {
     window[name] = value;
     return 0;
 };
+FUNCS.requstCurrentLoctationClosing = function() {
+    if (typeof window === "undefined") throw new Error("forceCloseBrowserTab: not in a browser");
+    window.close();
+    setTimeout(() => {
+        console.warn("TCS: requstCurrentLoctationClosing() was blocked by the browser. Tabs can only be closed by scripts if the script opened them.");
+    }, 100);
+    
+    return 0;
+};
 
 FUNCS.getCanvas = function(id) {
     if (typeof id !== "string") throw new Error("getCanvas: id must be a string");
@@ -1103,6 +1114,16 @@ FUNCS.getCanvas = function(id) {
     if (!canvas) throw new Error("getCanvas: no element with id '" + id + "'");
     return canvas.getContext("2d");
 };
+FUNCS.obj_keys = function(obj) {
+    if (obj === null || typeof obj !== "object") throw new Error("keys: expected object");
+    return Object.keys(obj);
+};
+FUNCS.obj_values = function(obj) {
+    if (obj === null || typeof obj !== "object") throw new Error("values: expected object");
+    return Object.values(obj);
+};
+FUNCS.JSON_stringify = function(obj) { return JSON.stringify(obj); };
+FUNCS.JSON_parse = function(str) { return JSON.parse(str); };
 FUNCS.fillRect = function(ctx, x, y, w, h, color) {
     if (!ctx || typeof ctx.fillRect !== "function") throw new Error("fillRect: invalid canvas context");
     if ([x, y, w, h].some(v => typeof v !== "number")) throw new Error("fillRect: all coords must be numbers");
@@ -1116,7 +1137,7 @@ FUNCS.clearCanvas = function(ctx) {
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     return 0;
 };
-FUNCS.runHTML = function(html) {
+FUNCS.runHyperTextMarkupLanguage = function(html) {
     if (typeof html !== "string") throw new Error("runHTML: html must be a string");
     const container = document.createElement("div");
     container.innerHTML = html;
@@ -1434,17 +1455,23 @@ async function evalExpr(node, env) {
       
       const needsDOM = [
         "changeBodyCSS", "query", "setText", "setHTML", "setValue", "setStyle", 
-        "show", "hide", "changePageTitle", "runHTML", "getValue", "changeTitle", 
-        "openLink", "reloadPage", "copyToClipboard"
+        "show", "hide", "changePageTitle", "runHyperTextMarkupLanguage", "getValue", "changeTitle", 
+        "openLink", "reloadPage", "copyToClipboard", "requstCurrentLoctationClosing"
       ];
-      const needsStorage = ["saveData", "loadData", "deleteData", "wipe", "wipeTCSData"];
+      const needsStorage = ["saveData", "loadData", "deleteData", "wipeAllCurrentWebsiteData", "wipeTCSData"];
       const needsSystem = [
         "getUserAgent", "getUserInfo", "now", "getYear", "getMonth", "getDay", 
         "getHours", "sleep", "wait", "alert", "prompt", "confirm", "getFullDate"
       ];
       const needsNetwork = ["fetchText", "fetchFn", "fetchTCSFn", "XTHttpsRequest", "fetchJSON", "ws_connect", "ws_send", "ws_close"];  
- const js = ["callJS", "javaScriptEval"];
-
+ const js = ["callJS", "javaScriptRunCodeAsText"];
+ const needsCFN = [];
+ if (name && TCS_PERMS.blacklist.includes(name)) {
+        throw new Error("Security Error: '" + name + "' is blocked by the host.");
+      }
+      if (name && needsCFN.includes(name) && !TCS_PERMS.cfn) {
+  throw new Error("Security Error: '" + name + "' requires CFN permission.");
+}
       if (name && needsNetwork.includes(name) && !TCS_PERMS.network) {
         throw new Error(`Security Error: '${name}' requires Network permission.`);
       }
@@ -1501,7 +1528,9 @@ async function RunTCS(code, perms = {}) {
     storage: perms.storage === true,
     system: perms.system === true,
     js: perms.js === true,
-    network: perms.network === true
+    network: perms.network === true,
+    cfn: perms.cfn === true,
+    blacklist: perms.blacklist || []
   };
   try {
     const tokens = tokenize(code);
@@ -1542,7 +1571,7 @@ if (typeof window !== "undefined") {
           RunTCS(code, { dom: true, storage: true, system: true, js: true, network: true}).then(result => {
             if (!result.ok) {
               console.error("TCS Tag Error:", result.error);
-              this.innerHTML = "❌ " + result.error;
+              this.innerHTML = result.error;
             }
           });
         }
@@ -1557,3 +1586,19 @@ if (typeof window !== "undefined") {
     }
   });
 }
+function AddFN(name, fn, perms) {
+    if (typeof name !== "string") throw new Error("AddFN: name must be a string");
+    if (typeof fn !== "function") throw new Error("AddFN: fn must be a function");    
+    FUNCS[name] = fn;    
+    if (perms && Array.isArray(perms)) {
+        perms.forEach(p => {
+            if (p === "dom" && !needsDOM.includes(name)) needsDOM.push(name);
+            if (p === "network" && !needsNetwork.includes(name)) needsNetwork.push(name);
+            if (p === "storage" && !needsStorage.includes(name)) needsStorage.push(name);
+            if (p === "system" && !needsSystem.includes(name)) needsSystem.push(name);
+            if (p === "js" && !js.includes(name)) js.push(name);
+        });
+    }
+}
+
+window.AddFN = AddFN;
