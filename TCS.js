@@ -1,19 +1,25 @@
 const TCS_VERSION = "6.9.2";
 const TCS_SERIES  = "8";
-const TCS_BUILD   = "16";
+const TCS_BUILD   = "17";
+
 const needsDOM = [
-  "changeBodyCSS", "query", "setText", "setHTML", "setValue", "setStyle", 
+  "changeBodyCSS", "query", "queryAll", "setText", "setHTML", "setValue", "setStyle", 
   "show", "hide", "changePageTitle", "runHyperTextMarkupLanguage", "getValue", "changeTitle", 
-  "openLink", "reloadPage", "copyToClipboard", "requstCurrentLoctationClosing"
+  "openLink", "reloadPage", "copyToClipboard", "requstCurrentLoctationClosing", "makeTag", "getTagContent"
 ];
 const needsStorage = ["saveData", "loadData", "deleteData", "wipeAllCurrentWebsiteData", "wipeTCSData"];
 const needsSystem = [
   "getUserAgent", "getUserInfo", "now", "getYear", "getMonth", "getDay", 
-  "getHours", "sleep", "wait", "alert", "prompt", "confirm", "getFullDate"
+  "getHours", "sleep", "wait", "alert", "prompt", "confirm", "getFullDate", "saveToLocalFileStorage", "updateToLocalFileStorage",
+  "readFromLocalFileStorage"
 ];
-const needsNetwork = ["fetchText", "fetchFn", "fetchTCSFn", "XTHttpsRequest", "fetchJSON", "ws_connect", "ws_send", "ws_close"];
+const needsNetwork = [
+  "fetchText", "fetchFn", "fetchTCSFn", "XTHttpsRequest", "fetchJSON", 
+  "ws_connect", "ws_send", "ws_close", "loadJavaScriptTCSFunction"
+];
 const js = ["callJS", "javaScriptRunCodeAsText"];
 const needsCFN = [];
+
 const tcs = {
   version: "TCS_JS_" + TCS_SERIES,
   full_version: TCS_VERSION,
@@ -21,25 +27,24 @@ const tcs = {
   js: "JavaScript Eruda E2026",
   interpreter: "AST",
   build: TCS_BUILD,
-  info: "TCS_JS_" + TCS_SERIES +
-        "/JS_Eruda/JS_E2026/MIT" +
-        "/B_" + TCS_BUILD +
-        "/V_" + TCS_SERIES +
-        "/FV_" + TCS_VERSION +
-        "/AST"
+  info: "TCS_JS_" + TCS_SERIES + "/JS_Eruda/JS_E2026/MIT" + "/B_" + TCS_BUILD + "/V_" + TCS_SERIES + "/FV_" + TCS_VERSION + "/AST"
 };
 
 function tokenize(src) {
   src = src.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&"); 
   const tokens = [];
   let i = 0;
+  let line = 1;
   const isDigit = c => c >= '0' && c <= '9';
   const isAlpha = c => /[a-zA-Z_]/.test(c);
   const isAlphaNum = c => isAlpha(c) || isDigit(c);
   
   while (i < src.length) {
     const c = src[i];
-    if (/\s/.test(c)) { i++; continue; }
+    if (/\s/.test(c)) { 
+      if (c === '\n') line++;
+      i++; continue; 
+    }
 
     if (c === '/' && src[i+1] === '/') {
       while (i < src.length && src[i] !== '\n') i++;
@@ -47,49 +52,52 @@ function tokenize(src) {
     }
 
     if (c === '"') {
-  i++;
-  let s = "";
-  while (i < src.length && src[i] !== '"') {
-    if (src[i] === '\\' && i + 1 < src.length) {
-      const next = src[i + 1];
-      if (next === '"')  { s += '"';  i += 2; continue; }
-      if (next === "'")  { s += "'";  i += 2; continue; }
-      if (next === '/')  { s += '/';  i += 2; continue; } 
-      if (next === 'n')  { s += '\n'; i += 2; continue; }
-      if (next === 't')  { s += '\t'; i += 2; continue; }
-      if (next === 'r')  { s += '\r'; i += 2; continue; }
-      if (next === '0')  { s += '\0'; i += 2; continue; }
-      if (next === '\\') { s += '\\'; i += 2; continue; }
+      i++;
+      let s = "";
+      while (i < src.length && src[i] !== '"') {
+        if (src[i] === '\\' && i + 1 < src.length) {
+          const next = src[i + 1];
+          if (next === '"')  { s += '"';  i += 2; continue; }
+          if (next === "'")  { s += "'";  i += 2; continue; }
+          if (next === '/')  { s += '/';  i += 2; continue; } 
+          if (next === 'n')  { s += '\n'; i += 2; continue; }
+          if (next === 't')  { s += '\t'; i += 2; continue; }
+          if (next === 'r')  { s += '\r'; i += 2; continue; }
+          if (next === '0')  { s += '\0'; i += 2; continue; }
+          if (next === '\\') { s += '\\'; i += 2; continue; }
+        }
+        if (src[i] === '\n') line++;
+        s += src[i++];
+      }
+      if (i >= src.length) throw new Error("Unterminated string literal at line " + line);
+      i++;
+      tokens.push({ type: "STRING", value: s, line: line });
+      continue;
     }
-    s += src[i++];
-  }
-  if (i >= src.length) throw new Error("Unterminated string literal");
-  i++;
-  tokens.push({ type: "STRING", value: s });
-  continue;
-}
+
     if (c === "'") {
-  i++;
-  let s = "";
-  while (i < src.length && src[i] !== "'") {
-    if (src[i] === '\\' && i + 1 < src.length) {
-      const next = src[i + 1];
-      if (next === "'")  { s += "'";  i += 2; continue; }
-      if (next === '"')  { s += '"';  i += 2; continue; }
-      if (next === '/')  { s += '/';  i += 2; continue; }  
-      if (next === 'n')  { s += '\n'; i += 2; continue; }
-      if (next === 't')  { s += '\t'; i += 2; continue; }
-      if (next === 'r')  { s += '\r'; i += 2; continue; }
-      if (next === '0')  { s += '\0'; i += 2; continue; }
-      if (next === '\\') { s += '\\'; i += 2; continue; }
+      i++;
+      let s = "";
+      while (i < src.length && src[i] !== "'") {
+        if (src[i] === '\\' && i + 1 < src.length) {
+          const next = src[i + 1];
+          if (next === "'")  { s += "'";  i += 2; continue; }
+          if (next === '"')  { s += '"';  i += 2; continue; }
+          if (next === '/')  { s += '/';  i += 2; continue; }  
+          if (next === 'n')  { s += '\n'; i += 2; continue; }
+          if (next === 't')  { s += '\t'; i += 2; continue; }
+          if (next === 'r')  { s += '\r'; i += 2; continue; }
+          if (next === '0')  { s += '\0'; i += 2; continue; }
+          if (next === '\\') { s += '\\'; i += 2; continue; }
+        }
+        if (src[i] === '\n') line++;
+        s += src[i++];
+      }
+      if (i >= src.length) throw new Error("Unterminated single-quoted string at line " + line);
+      i++;
+      tokens.push({ type: "STRING", value: s, line: line });
+      continue;
     }
-    s += src[i++];
-  }
-  if (i >= src.length) throw new Error("Unterminated single-quoted string");
-  i++;
-  tokens.push({ type: "STRING", value: s });
-  continue;
-}
 
     if (c === '`') {
       i++;
@@ -103,56 +111,60 @@ function tokenize(src) {
           if (next === 't')  { s += '\t'; i += 2; continue; }
           if (next === '\\') { s += '\\'; i += 2; continue; }
         }
-        if (src[i] === '\n') s += '\n';
+        if (src[i] === '\n') { s += '\n'; line++; }
         else s += src[i];
         i++;
       }
       i++;
-      tokens.push({ type: "TEMPLATE", value: s });
+      tokens.push({ type: "TEMPLATE", value: s, line: line });
       continue;
     }
 
     if (isDigit(c)) {
       let n = "";
       while (i < src.length && isDigit(src[i])) n += src[i++];
-      tokens.push({ type: "NUMBER", value: parseInt(n, 10) });
+      tokens.push({ type: "NUMBER", value: parseInt(n, 10), line: line });
       continue;
     }
 
     if (isAlpha(c)) {
       let w = "";
       while (i < src.length && isAlphaNum(src[i])) w += src[i++];
-      tokens.push({ type: "WORD", value: w });
+      tokens.push({ type: "WORD", value: w, line: line });
       continue;
     }
 
     const two = src.substr(i, 2);
     if (["==", "!=", "<=", ">=", "&&", "||", ".."].includes(two)) {
-      tokens.push({ type: "OP", value: two });
+      tokens.push({ type: "OP", value: two, line: line });
       i += 2;
       continue;
     }
 
     if ("+-*/%<>()[]{},;.!?:=".includes(c)) {
-      tokens.push({ type: "OP", value: c });
+      tokens.push({ type: "OP", value: c, line: line });
       i++;
       continue;
     }
-    throw new Error("Unexpected character: " + c);
+    throw new Error("Unexpected character: " + c + " at line " + line);
   }
-  tokens.push({ type: "EOF" });
+  tokens.push({ type: "EOF", line: line });
   return tokens;
 }
 
 function parse(tokens) {
   let pos = 0;
-  const peek = () => tokens[pos] || { type: "EOF" };
+  const peek = () => tokens[pos] || { type: "EOF", line: 0 };
   const at = (t, v) => peek().type === t && (v === undefined || peek().value === v);
   const eat = () => tokens[pos++];
   const expect = (t, v) => {
-    if (!at(t, v)) throw new Error("Expected " + (v || t) + ", got '" + peek().value + "'");
+    if (!at(t, v)) throw new Error("Expected " + (v || t) + ", got '" + peek().value + "' at line " + peek().line);
     return eat();
   };
+
+  function node(type, props) {
+    return { type, line: peek().line, ...props };
+  }
 
   function parseProgram() {
     const body = [];
@@ -160,7 +172,7 @@ function parse(tokens) {
       if (at("OP", ";")) { eat(); continue; }
       body.push(parseStatement());
     }
-    return { type: "Program", body };
+    return node("Program", { body });
   }
 
   function parseStatement() {
@@ -169,65 +181,65 @@ function parse(tokens) {
     if (at("WORD", "import")) return parseImport();
     if (at("WORD", "if"))  return parseIf();
     if (at("WORD", "switch")) {
-  eat();
-  expect("OP", "(");
-  const expr = parseExpression();
-  expect("OP", ")");
-  expect("OP", "{");
-  
-  const cases = [];
-  let defaultCase = null;
+      eat();
+      expect("OP", "(");
+      const expr = parseExpression();
+      expect("OP", ")");
+      expect("OP", "{");
+      
+      const cases = [];
+      let defaultCase = null;
 
-  while (!at("OP", "}") && !at("EOF")) {
-    if (at("WORD", "case")) {
-      eat();
-      const val = parseExpression();
-      expect("OP", ":");
-      const body = [];
-      while (!at("WORD", "case") && !at("WORD", "default") && !at("OP", "}") && !at("EOF")) {
-        body.push(parseStatement());
+      while (!at("OP", "}") && !at("EOF")) {
+        if (at("WORD", "case")) {
+          eat();
+          const val = parseExpression();
+          expect("OP", ":");
+          const body = [];
+          while (!at("WORD", "case") && !at("WORD", "default") && !at("OP", "}") && !at("EOF")) {
+            body.push(parseStatement());
+          }
+          cases.push({ val, body });
+        } 
+        else if (at("WORD", "default")) {
+          eat();
+          expect("OP", ":");
+          const body = [];
+          while (!at("WORD", "case") && !at("WORD", "default") && !at("OP", "}") && !at("EOF")) {
+            body.push(parseStatement());
+          }
+          defaultCase = body;
+        } 
+        else {
+          throw new Error("Expected 'case' or 'default' inside switch at line " + peek().line);
+        }
       }
-      cases.push({ val, body });
-    } 
-    else if (at("WORD", "default")) {
-      eat();
-      expect("OP", ":");
-      const body = [];
-      while (!at("WORD", "case") && !at("WORD", "default") && !at("OP", "}") && !at("EOF")) {
-        body.push(parseStatement());
-      }
-      defaultCase = body;
-    } 
-    else {
-      throw new Error("Expected 'case' or 'default' inside switch");
+      expect("OP", "}");
+      return node("Switch", { expr, cases, defaultCase });
     }
-  }
-  expect("OP", "}");
-  return { type: "Switch", expr, cases, defaultCase };
-}
     if (at("WORD", "while")) return parseWhile();
     if (at("WORD", "until")) {
-  eat();
-  expect("OP", "(");
-  const cond = parseExpression();
-  expect("OP", ")");
-  expect("OP", "{");
-  const body = parseBlock();
-  expect("OP", "}");
-  return { type: "Until", cond, body };
-}
+      eat();
+      expect("OP", "(");
+      const cond = parseExpression();
+      expect("OP", ")");
+      expect("OP", "{");
+      const body = parseBlock();
+      expect("OP", "}");
+      return node("Until", { cond, body });
+    }
     if (at("WORD", "for")) return parseFor();
     if (at("WORD", "fn"))  return parseFn();
     if (at("WORD", "try")) return parseTry();
     if (at("WORD", "throw")) return parseThrow();
     if (at("WORD", "on")) return parseOn();
-    if (at("WORD", "break")) { eat(); if (at("OP", ";")) eat(); return { type: "Break" }; }
-    if (at("WORD", "continue")) { eat(); if (at("OP", ";")) eat(); return { type: "Continue" }; }
+    if (at("WORD", "break")) { eat(); if (at("OP", ";")) eat(); return node("Break", {}); }
+    if (at("WORD", "continue")) { eat(); if (at("OP", ";")) eat(); return node("Continue", {}); }
     if (at("WORD", "return")) {
       eat();
       const v = at("OP", "}") ? null : parseExpression();
       if (at("OP", ";")) eat();
-      return { type: "Return", value: v };
+      return node("Return", { value: v });
     }
 
     const expr = parseExpression();
@@ -236,23 +248,22 @@ function parse(tokens) {
       const value = parseExpression();
       if (at("OP", ";")) eat();
       if (expr.type === "Member") {
-        return { type: "SetMember", obj: expr.obj, prop: expr.prop, value };
+        return node("SetMember", { obj: expr.obj, prop: expr.prop, value });
       }
-if (expr.type === "Index") {
-  return { type: "SetIndex", obj: expr.obj, index: expr.index, value };
-}
-return { type: "Set", name: expr.name, value };
-      return { type: "Set", name: expr.name, value };
+      if (expr.type === "Index") {
+        return node("SetIndex", { obj: expr.obj, index: expr.index, value });
+      }
+      return node("Set", { name: expr.name, value });
     }
     if (at("WORD", "set")) {
       eat();
       expect("OP", "=");
       const value = parseExpression();
       if (at("OP", ";")) eat();
-      return { type: "Set", name: expr.name, value };
+      return node("Set", { name: expr.name, value });
     }
     if (at("OP", ";")) eat();
-    return { type: "ExprStmt", expr };
+    return node("ExprStmt", { expr });
   }
 
   function parseImport() {
@@ -264,7 +275,7 @@ return { type: "Set", name: expr.name, value };
       alias = expect("WORD").value;
     }
     if (at("OP", ";")) eat();
-    return { type: "Import", url, alias };
+    return node("Import", { url, alias });
   }
 
   function parseLet(isConst) {
@@ -286,7 +297,7 @@ return { type: "Set", name: expr.name, value };
     expect("OP", "=");
     const value = parseExpression();
     if (at("OP", ";")) eat();
-    return { type: "Let", name, value, declared, isConst };
+    return node("Let", { name, value, declared, isConst });
   }
 
   function parseOn() {
@@ -297,10 +308,8 @@ return { type: "Set", name: expr.name, value };
     expect("OP", "{");
     const body = parseBlock();
     expect("OP", "}");
-    return { type: "On", event, selector, body };
+    return node("On", { event, selector, body });
   }
-  
-  
 
   function parseIf() {
     expect("WORD", "if");
@@ -318,7 +327,7 @@ return { type: "Set", name: expr.name, value };
         expect("OP", "}");
       }
     }
-    return { type: "If", cond, then, otherwise };
+    return node("If", { cond, then, otherwise });
   }
 
   function parseWhile() {
@@ -327,7 +336,7 @@ return { type: "Set", name: expr.name, value };
     expect("OP", "{");
     const body = parseBlock();
     expect("OP", "}");
-    return { type: "While", cond, body };
+    return node("While", { cond, body });
   }
 
   function parseFor() {
@@ -340,7 +349,7 @@ return { type: "Set", name: expr.name, value };
     expect("OP", "{");
     const body = parseBlock();
     expect("OP", "}");
-    return { type: "For", name, start, end, body };
+    return node("For", { name, start, end, body });
   }
 
   function parseFn() {
@@ -356,7 +365,7 @@ return { type: "Set", name: expr.name, value };
     expect("OP", "{");
     const body = parseBlock();
     expect("OP", "}");
-    return { type: "Fn", name, params, body };
+    return node("Fn", { name, params, body });
   }
 
   function parseTry() {
@@ -378,15 +387,15 @@ return { type: "Set", name: expr.name, value };
       finallyBody = parseBlock();
       expect("OP", "}");
     }
-    if (!catchBody && !finallyBody) throw new Error("try: needs 'catch' or 'finally'");
-    return { type: "Try", body, catchName, catchBody, finallyBody };
+    if (!catchBody && !finallyBody) throw new Error("try: needs 'catch' or 'finally' at line " + peek().line);
+    return node("Try", { body, catchName, catchBody, finallyBody });
   }
 
   function parseThrow() {
     expect("WORD", "throw");
     const value = parseExpression();
     if (at("OP", ";")) eat();
-    return { type: "Throw", value };
+    return node("Throw", { value });
   }
 
   function parseBlock() {
@@ -405,46 +414,46 @@ return { type: "Set", name: expr.name, value };
       const thenExpr = parseExpression();
       expect("OP", ":");
       const elseExpr = parseExpression();
-      return { type: "Ternary", cond: expr, then: thenExpr, else: elseExpr };
+      return node("Ternary", { cond: expr, then: thenExpr, else: elseExpr });
     }
     return expr;
   }
 
   function parseOr() {
     let l = parseAnd();
-    while (at("OP", "||")) { const op = eat().value; l = { type:"Binary", op, left:l, right:parseAnd() }; }
+    while (at("OP", "||")) { const op = eat().value; l = node("Binary", { op, left:l, right:parseAnd() }); }
     return l;
   }
   function parseAnd() {
     let l = parseEquality();
-    while (at("OP", "&&")) { const op = eat().value; l = { type:"Binary", op, left:l, right:parseEquality() }; }
+    while (at("OP", "&&")) { const op = eat().value; l = node("Binary", { op, left:l, right:parseEquality() }); }
     return l;
   }
   function parseEquality() {
     let l = parseComparison();
-    while (at("OP","==") || at("OP","!=")) { const op = eat().value; l = { type:"Binary", op, left:l, right:parseComparison() }; }
+    while (at("OP","==") || at("OP","!=")) { const op = eat().value; l = node("Binary", { op, left:l, right:parseComparison() }); }
     return l;
   }
   function parseComparison() {
     let l = parseTerm();
     while (at("OP","<")||at("OP",">")||at("OP","<=")||at("OP",">=")) {
-      const op = eat().value; l = { type:"Binary", op, left:l, right:parseTerm() };
+      const op = eat().value; l = node("Binary", { op, left:l, right:parseTerm() });
     }
     return l;
   }
   function parseTerm() {
     let l = parseFactor();
-    while (at("OP","+")||at("OP","-")) { const op = eat().value; l = { type:"Binary", op, left:l, right:parseFactor() }; }
+    while (at("OP","+")||at("OP","-")) { const op = eat().value; l = node("Binary", { op, left:l, right:parseFactor() }); }
     return l;
   }
   function parseFactor() {
     let l = parseUnary();
-    while (at("OP","*")||at("OP","/")||at("OP","%")) { const op = eat().value; l = { type:"Binary", op, left:l, right:parseUnary() }; }
+    while (at("OP","*")||at("OP","/")||at("OP","%")) { const op = eat().value; l = node("Binary", { op, left:l, right:parseUnary() }); }
     return l;
   }
   function parseUnary() {
-    if (at("OP","-")) { eat(); return { type:"Unary", op:"-", expr:parseUnary() }; }
-    if (at("OP","!")) { eat(); return { type:"Unary", op:"!", expr:parseUnary() }; }
+    if (at("OP","-")) { eat(); return node("Unary", { op:"-", expr:parseUnary() }); }
+    if (at("OP","!")) { eat(); return node("Unary", { op:"!", expr:parseUnary() }); }
     return parsePostfix();
   }
   
@@ -455,70 +464,70 @@ return { type: "Set", name: expr.name, value };
         eat();
         const idx = parseExpression();
         expect("OP","]");
-        e = { type:"Index", obj:e, index:idx };
+        e = node("Index", { obj:e, index:idx });
       } else if (at("OP","(")) {
         eat();
         const args = [];
         while (!at("OP",")")) { args.push(parseExpression()); if (at("OP",",")) eat(); else break; }
         expect("OP",")");
-        e = { type:"Call", callee:e, args };
+        e = node("Call", { callee:e, args });
       } else if (at("OP",".")) {
         eat();
         const prop = expect("WORD").value;
-        e = { type:"Member", obj:e, prop };
+        e = node("Member", { obj:e, prop });
       } else break;
     }
     return e;
   }
 
   function parsePrimary() {
-  if (at("NUMBER")) return { type:"Number", value: eat().value };
-  if (at("STRING")) return { type:"String", value: eat().value };
-  if (at("TEMPLATE")) return { type: "Template", value: eat().value };
-  
-  if (at("WORD","true"))  { eat(); return { type:"Bool", value:true  }; }
-  if (at("WORD","false")) { eat(); return { type:"Bool", value:false }; }
-  if (at("WORD", "undefined")) { eat(); return { type: "Undefined" }; }
-  if (at("WORD", "null"))      { eat(); return { type: "Null" }; }
-  if (at("WORD", "NaN"))       { eat(); return { type: "NaN" }; }
-  
-  if (at("WORD", "typeof")) {
-    eat();
-    const expr = parseUnary();
-    return { type: "TypeOf", expr: expr };
-  }
-  
-  if (at("OP","(")) { eat(); const e = parseExpression(); expect("OP",")"); return e; }
-  
-  if (at("OP","[")) {
-    eat();
-    const el = [];
-    while (!at("OP","]")) { el.push(parseExpression()); if (at("OP",",")) eat(); else break; }
-    expect("OP","]");
-    return { type:"Array", elements:el };
-  }
-
-  if (at("OP", "{")) {
-    eat();
-    const properties = [];
-    while (!at("OP", "}")) {
-      const key = expect("WORD").value;
-      expect("OP", ":");
-      const value = parseExpression();
-      properties.push({ key, value });
-      if (at("OP", ",")) eat();
-      else break;
+    if (at("NUMBER")) return node("Number", { value: eat().value });
+    if (at("STRING")) return node("String", { value: eat().value });
+    if (at("TEMPLATE")) return node("Template", { value: eat().value });
+    
+    if (at("WORD","true"))  { eat(); return node("Bool", { value:true  }); }
+    if (at("WORD","false")) { eat(); return node("Bool", { value:false }); }
+    if (at("WORD", "undefined")) { eat(); return node("Undefined", {}); }
+    if (at("WORD", "null"))      { eat(); return node("Null", {}); }
+    if (at("WORD", "NaN"))       { eat(); return node("NaN", {}); }
+    
+    if (at("WORD", "typeof")) {
+      eat();
+      const expr = parseUnary();
+      return node("TypeOf", { expr });
     }
-    expect("OP", "}");
-    return { type: "Object", properties };
-  }
+    
+    if (at("OP","(")) { eat(); const e = parseExpression(); expect("OP",")"); return e; }
+    
+    if (at("OP","[")) {
+      eat();
+      const el = [];
+      while (!at("OP","]")) { el.push(parseExpression()); if (at("OP",",")) eat(); else break; }
+      expect("OP","]");
+      return node("Array", { elements:el });
+    }
 
-  if (at("WORD")) {
-      let ident = { type:"Ident", name: eat().value };
-      return parsePostfix(ident);
+    if (at("OP", "{")) {
+      eat();
+      const properties = [];
+      while (!at("OP", "}")) {
+        const key = expect("WORD").value;
+        expect("OP", ":");
+        const value = parseExpression();
+        properties.push({ key, value });
+        if (at("OP", ",")) eat();
+        else break;
+      }
+      expect("OP", "}");
+      return node("Object", { properties });
+    }
+
+    if (at("WORD")) {
+        let ident = node("Ident", { name: eat().value });
+        return parsePostfix(ident);
+    }
+    throw new Error("Unexpected token: " + peek().value + " at line " + peek().line);
   }
-  throw new Error("Unexpected token: " + peek().value);
-}
   return parseProgram();
 }
 
@@ -556,16 +565,13 @@ class Env {
 }
 
 const FUNCS = {};
-let TCS_PERMS = { dom: false, storage: false, system: false, js: false, network: false, cfn: false,blacklist: [] };
+let TCS_PERMS = { dom: false, storage: false, system: false, js: false, network: false, cfn: false, blacklist: [] };
 const TCS_SOCKETS = {};
-
 
 FUNCS.console_log = function(text) { console.log(text); return 0; };
 FUNCS.console_error = function(text) { console.error(text); return 0; };
 FUNCS.console_warn = function(text) { console.warn(text); return 0; };
-FUNCS.console_time = function(label) {
-    console.time(label); return 0;
-};
+FUNCS.console_time = function(label) { console.time(label); return 0; };
 FUNCS.urlEncode = function(s) {
     if (typeof s !== "string") throw new Error("urlEncode: expected a string");
     return encodeURIComponent(s);
@@ -605,30 +611,21 @@ FUNCS.len = function(s) {
     return Array.isArray(s) ? s.length : String(s).length;
 };
 
-
-
 FUNCS.ws_connect = function(url, onMessageFnName, onOpenFnName, onCloseFnName) {
     if (typeof url !== "string") throw new Error("ws_connect: URL must be a string");
     const ws = new WebSocket(url);
     const id = "ws_" + Math.random().toString(36).substr(2, 9);
     TCS_SOCKETS[id] = ws;
     ws.onopen = () => {
-        if (onOpenFnName && FUNCS[onOpenFnName]) {
-            FUNCS[onOpenFnName](id);
-        }
+        if (onOpenFnName && FUNCS[onOpenFnName]) FUNCS[onOpenFnName](id);
     };
     ws.onmessage = (event) => {
-        if (onMessageFnName && FUNCS[onMessageFnName]) {
-            FUNCS[onMessageFnName](event.data, id);
-        }
+        if (onMessageFnName && FUNCS[onMessageFnName]) FUNCS[onMessageFnName](event.data, id);
     };
     ws.onclose = () => {
-        if (onCloseFnName && FUNCS[onCloseFnName]) {
-            FUNCS[onCloseFnName](id);
-        }
+        if (onCloseFnName && FUNCS[onCloseFnName]) FUNCS[onCloseFnName](id);
         delete TCS_SOCKETS[id]; 
     };
-
     return id;
 };
 
@@ -668,6 +665,27 @@ FUNCS.repeat = function(s, n) {
     if (s === undefined || s === null) throw new Error("repeat: expected a string");
     if (typeof n !== "number" || n < 0) throw new Error("repeat: count must be a non-negative number");
     return String(s).repeat(n);
+};
+FUNCS.updateToLocalFileStorage = async function(content, fileName) {
+    if (typeof content !== "string") throw new Error("updateToLocalFileStorage: content must be a string");
+    if (!window.showSaveFilePicker) {
+        throw new Error("updateToLocalFileStorage: File System Access API not supported in this browser");
+    }
+    try {
+        const handle = await window.showSaveFilePicker({
+            suggestedName: fileName || "tcs_file.txt",
+            types: [{
+                description: "Text Files",
+                accept: { "text/plain": [".txt", ".json", ".csv", ".html", ".tcs", ".cts", ".ctcs", ".js" ] }
+            }]
+        });
+        const writable = await handle.createWritable();
+        await writable.write(content);
+        await writable.close();
+        return 0;
+    } catch (err) {
+        throw new Error("updateToLocalFileStorage: " + err.message);
+    }
 };
 FUNCS.split = function(text, by) {
     if (typeof text !== "string") throw new Error("split: expected a string, got " + typeof text);
@@ -733,9 +751,9 @@ FUNCS.randomInt = function(min, max) {
     return Math.random() * (max - min + 1) + min;
 };
 FUNCS.floorNum = function(num) {
-	if(typeof num !== "number") throw new Error("floorNum: arg must be number");
-	return Math.floor(num);	
-	}
+    if(typeof num !== "number") throw new Error("floorNum: arg must be number");
+    return Math.floor(num);	
+};
 FUNCS.toNum = function(val) {
     if (val === null || val === undefined) throw new Error("toNum: cannot convert null/undefined");
     if (typeof val === "number") return val;
@@ -786,11 +804,23 @@ FUNCS.reverse = function(arr) {
     if (!Array.isArray(arr)) throw new Error("reverse: expected array");
     return arr.reverse();
 };
-FUNCS.indexOf = function(arr, item) {
-    return arr.indexOf(item);
+FUNCS.indexOf = function(target, item) {
+    if (typeof target === "string") {
+        return target.indexOf(String(item));
+    }
+    if (Array.isArray(target)) {
+        return target.indexOf(item);
+    }
+    throw new Error("indexOf: expected a string or array");
 };
-FUNCS.lastIndexOf = function(arr, item) {
-    return arr.lastIndexOf(item);
+FUNCS.lastIndexOf = function(target, item) {
+    if (typeof target === "string") {
+        return target.lastIndexOf(String(item));
+    }
+    if (Array.isArray(target)) {
+        return target.lastIndexOf(item);
+    }
+    throw new Error("lastIndexOf: expected a string or array");
 };
 FUNCS.clearArray = function(arr) {
     if (!Array.isArray(arr)) throw new Error("clearArray: expected array");
@@ -801,21 +831,30 @@ FUNCS.arrayContains = function(arr, item) {
     if (!Array.isArray(arr)) throw new Error("arrayContains: expected array");
     return arr.includes(item);
 };
+FUNCS.contains = function(str, item) {
+    if (!typeof str === "string") throw new Error("contains: expected string");
+    return str.includes(item);
+};
 FUNCS.splice = function(arr, start, deleteCount, ...items) {
-    if (!Array.isArray(arr)) throw new Error("splice: expected array");
+    if (arr === null || arr === undefined) throw new Error("splice: expected array or array-like");
     if (typeof start !== "number") throw new Error("splice: start must be a number");
     if (deleteCount !== undefined && typeof deleteCount !== "number")
-        throw new Error("splice: deleteCount must be a number");
-    if (deleteCount === undefined) deleteCount = arr.length - start;
-    return arr.splice(start, deleteCount, ...items);
+        throw new Error("splice: deleteCount must be a number");  
+    if (!Array.isArray(arr) && typeof arr.length !== "number")
+        throw new Error("splice: expected array or array-like");  
+    if (deleteCount === undefined) deleteCount = arr.length - start; 
+    return Array.prototype.splice.call(arr, start, deleteCount, ...items);
 };
+
 FUNCS.slice = function(arr, start, end) {
-    if (!Array.isArray(arr)) throw new Error("slice: expected array");
+    if (arr === null || arr === undefined) throw new Error("slice: expected array or array-like");
+    if (!Array.isArray(arr) && typeof arr.length !== "number")
+        throw new Error("slice: expected array or array-like");    
     if (start !== undefined && typeof start !== "number")
         throw new Error("slice: start must be a number");
     if (end !== undefined && typeof end !== "number")
-        throw new Error("slice: end must be a number");
-    return arr.slice(start, end);
+        throw new Error("slice: end must be a number");   
+    return Array.prototype.slice.call(arr, start, end);
 };
 
 FUNCS.typeOf = function(val) {
@@ -1116,7 +1155,6 @@ FUNCS.requstCurrentLoctationClosing = function() {
     setTimeout(() => {
         console.warn("TCS: requstCurrentLoctationClosing() was blocked by the browser. Tabs can only be closed by scripts if the script opened them.");
     }, 100);
-    
     return 0;
 };
 
@@ -1133,6 +1171,50 @@ FUNCS.obj_keys = function(obj) {
 FUNCS.obj_values = function(obj) {
     if (obj === null || typeof obj !== "object") throw new Error("values: expected object");
     return Object.values(obj);
+};
+FUNCS.loadJavaScriptTCSFunction = function(url) {
+    if (typeof url !== "string") throw new Error("loadJavaScriptTCSFunction: expected a URL string");
+    return new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = url;
+        script.onload = () => resolve(0);
+        script.onerror = () => reject(new Error("loadJavaScriptTCSFunction: failed to load " + url));
+        document.head.appendChild(script);
+    });
+};
+FUNCS.makeTag = function(tagName, renderFnName) {
+    if (typeof tagName !== "string" || !tagName.includes("-")) {
+        throw new Error("makeTag: tag name must contain a hyphen (e.g., 'my-tag')");
+    }
+    if (typeof renderFnName !== "string") {
+        throw new Error("makeTag: expected a TCS function name");
+    }
+    class TCSLangTag extends HTMLElement {
+        connectedCallback() {
+            const fn = FUNCS[renderFnName];
+            if (fn && fn.body) {
+                const child = new Env(fn.closure);
+                child.declare(fn.params[0], this);
+                (async () => {
+                    try {
+                        for (const s of fn.body) await exec(s, child);
+                    } catch (e) {
+                        console.error("[TCS Tag Error]", e.message);
+                    }
+                })();
+            } else {
+                console.warn("makeTag: TCS function '" + renderFnName + "' not found");
+            }
+        }
+    }
+    if (!customElements.get(tagName)) {
+        customElements.define(tagName, TCSLangTag);
+    }
+    return 0;
+};
+FUNCS.getTagContent = function(el) {
+    if (!el) throw new Error("getTagContent: no element provided");
+    return el.textContent || el.innerHTML || "";
 };
 FUNCS.JSON_stringify = function(obj) { return JSON.stringify(obj); };
 FUNCS.JSON_parse = function(str) { return JSON.parse(str); };
@@ -1181,8 +1263,70 @@ FUNCS.setVolume = function(vol) {
     if (currentAudio) currentAudio.volume = Math.max(0, Math.min(1, vol));
     return 0;
 };
+FUNCS.getAttribute = function(el, attrName) {
+    if (!el) throw new Error("getAttribute: no element provided");
+    if (typeof attrName !== "string") throw new Error("getAttribute: attrName must be a string");
+    return el.getAttribute(attrName) || "";
+};
+FUNCS.readFromLocalFileStorage = function(callbackFnName) {
+    if (typeof callbackFnName !== "string") {
+        throw new Error("readFromLocalFileStorage: expected a TCS function name");
+    }
+
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".txt,.json,.csv,.tcs,.md";
+    
+    input.onchange = (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const content = e.target.result;
+            const fn = FUNCS[callbackFnName];
+            if (fn && fn.body) {
+                const child = new Env(fn.closure);
+                child.declare(fn.params[0], content);
+                child.declare(fn.params[1], file.name);
+                (async () => {
+                    try {
+                        for (const s of fn.body) await exec(s, child);
+                    } catch (e) {
+                        console.error("[TCS File Read Error]", e.message);
+                    }
+                })();
+            }
+        };
+        reader.readAsText(file);
+    };
+
+    input.click();
+    return 0;
+};
+FUNCS.saveToLocalFileStorage = function(content, mimeType, fileName) {
+    if (typeof content !== "string") throw new Error("saveToLocalFileStorage: content must be a string");
+    if (typeof mimeType !== "string") mimeType = "text/plain";
+    if (typeof fileName !== "string") fileName = "tcs_TextFile.txt";
+
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    try {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();   
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);    
+    return 0;
+    } catch(err) {
+    	throw new Error("saveToLocalFileStorage save err:" + err);
+    }
+};
 FUNCS.pauseAudio = function() { if (currentAudio) currentAudio.pause(); return 0; };
 FUNCS.resumeAudio = function() { if (currentAudio) currentAudio.play(); return 0; };
+
 const SIGNAL_RETURN = "__return";
 const SIGNAL_BREAK = "__break";
 const SIGNAL_SWITCH_BREAK = "__switch_break";
@@ -1196,320 +1340,322 @@ async function runFinally(body, env) { for (const s of body) await exec(s, env);
 async function run(ast, env) { for (const stmt of ast.body) await exec(stmt, env); }
 
 async function exec(node, env) {
-  switch (node.type) {
-    case "Let": {
-      const v = await evalExpr(node.value, env);
-      if (node.declared) checkType(v, node.declared, node.name);
-      env.declare(node.name, v, node.isConst);
-      return;
-    }
-    case "Import": {
-      await FUNCS.fetchTCSFn(node.url);
-      return;
-    }
-    case "Switch": {
-  const switchVal = await evalExpr(node.expr, env);
-  let matched = false;  
   try {
-    for (let i = 0; i < node.cases.length; i++) {
-      const c = node.cases[i];
-      if (matched || (await evalExpr(c.val, env)) === switchVal) {
-        matched = true;
-        for (const s of c.body) await exec(s, env);
+    switch (node.type) {
+      case "Let": {
+        const v = await evalExpr(node.value, env);
+        if (node.declared) checkType(v, node.declared, node.name);
+        env.declare(node.name, v, node.isConst);
+        return;
       }
-    }
-    if (!matched && node.defaultCase) {
-      for (const s of node.defaultCase) await exec(s, env);
-    }
-  } catch (e) {
-  if (e && e[SIGNAL_BREAK] !== undefined) {
-    return;
-  }
-  throw e;
-}
-  return;
-}
-    case "Set": {
-      if (!node.name) throw new Error("Invalid 'set' target");
-      const v = await evalExpr(node.value, env);
-      const old = env.get(node.name);
-      if (typeof old !== typeof v) throw new Error("type mismatch on '" + node.name + "'");
-      env.set(node.name, v);
-      return;
-    }
-    case "SetMember": {
-      const obj = await evalExpr(node.obj, env);
-      const value = await evalExpr(node.value, env);
-      if (obj === null || obj === undefined) throw new Error("cannot set property on null");
-      if (typeof obj !== "object") throw new Error("cannot set property on non-object");
-      obj[node.prop] = value;
-      return;
-    }
-    case "SetIndex": {
-  const obj = await evalExpr(node.obj, env);
-  const idx = await evalExpr(node.index, env);
-  const value = await evalExpr(node.value, env);
-  if (obj === null || obj === undefined) throw new Error("cannot index undefined");
-  obj[idx] = value;
-  return;
-}
-    case "If": {
-      const c = await evalExpr(node.cond, env);
-      if (typeof c !== "boolean") throw new Error("if condition must be boolean");
-      const branch = c ? node.then : node.otherwise;
-      if (branch) for (const s of branch) await exec(s, env);
-      return;
-    }
-    case "While": {
-  while (true) {
-    const c = await evalExpr(node.cond, env);
-    if (typeof c !== "boolean") throw new Error("while condition must be boolean");
-    if (!c) break;
-    const loopEnv = new Env(env);
-    try {
-      for (const s of node.body) await exec(s, loopEnv);
-    } catch (e) {
-      if (e && e[SIGNAL_BREAK] !== undefined) break;
-      if (e && e[SIGNAL_CONTINUE] !== undefined) continue;
-      throw e;
-    }
-  }
-  return;
-}
-case "Until": {
-  let loops = 0;
-  while (true) {
-    loops++;
-    if (loops > 1000000) throw new Error("Infinite loop detected in until");    
-    const c = await evalExpr(node.cond, env);
-    if (typeof c !== "boolean") throw new Error("until condition must be boolean");
-    if (c) break;   
-    const loopEnv = new Env(env);
-    try {
-      for (const s of node.body) await exec(s, loopEnv);
-    } catch (e) {
-      if (e && e[SIGNAL_BREAK] !== undefined) break;
-      if (e && e[SIGNAL_CONTINUE] !== undefined) continue;
-      throw e;
-    }
-  }
-  return;
-}
-
-    case "For": {
-      const a = await evalExpr(node.start, env);
-      const b = await evalExpr(node.end, env);
-      for (let i = a; i < b; i++) {
-        const child = new Env(env);
-        child.declare(node.name, i);
+      case "Import": {
+        await FUNCS.fetchFn(node.url);
+        return;
+      }
+      case "Switch": {
+        const switchVal = await evalExpr(node.expr, env);
+        let matched = false;  
         try {
-          for (const s of node.body) await exec(s, child);
+          for (let i = 0; i < node.cases.length; i++) {
+            const c = node.cases[i];
+            if (matched || (await evalExpr(c.val, env)) === switchVal) {
+              matched = true;
+              for (const s of c.body) await exec(s, env);
+            }
+          }
+          if (!matched && node.defaultCase) {
+            for (const s of node.defaultCase) await exec(s, env);
+          }
         } catch (e) {
-          if (e && e[SIGNAL_BREAK] !== undefined) break;
-          if (e && e[SIGNAL_CONTINUE] !== undefined) continue;
+          if (e && e[SIGNAL_BREAK] !== undefined) return;
           throw e;
         }
+        return;
       }
-      return;
-    }
-    case "Fn": {
-      FUNCS[node.name] = { params: node.params, body: node.body, closure: env };
-      return;
-    }
-    case "Return": throw { [SIGNAL_RETURN]: node.value ? await evalExpr(node.value, env) : 0 };
-    case "Throw": throw new Error(String(await evalExpr(node.value, env)));
-    case "Break": throw { [SIGNAL_BREAK]: true };
-    case "Continue": throw { [SIGNAL_CONTINUE]: true };
-    case "Try": {
-      let threw = false, caughtError = null;
-      try { for (const s of node.body) await exec(s, env); } 
-      catch (e) {
-        if (isSignal(e)) { if (node.finallyBody) await runFinally(node.finallyBody, env); throw e; }
-        if (!node.catchBody) { if (node.finallyBody) await runFinally(node.finallyBody, env); throw e; }
-        threw = true; caughtError = e;
+      case "Set": {
+        if (!node.name) throw new Error("Invalid 'set' target");
+        const v = await evalExpr(node.value, env);
+        const old = env.get(node.name);
+        if (typeof old !== typeof v) throw new Error("type mismatch on '" + node.name + "'");
+        env.set(node.name, v);
+        return;
       }
-      if (threw) {
-        const catchEnv = new Env(env);
-        const msg = (caughtError && caughtError.message !== undefined) ? String(caughtError.message) : String(caughtError);
-        catchEnv.declare(node.catchName, msg);
-        try { for (const s of node.catchBody) await exec(s, catchEnv); } 
-        catch (e) { if (node.finallyBody) await runFinally(node.finallyBody, env); throw e; }
+      case "SetMember": {
+        const obj = await evalExpr(node.obj, env);
+        const value = await evalExpr(node.value, env);
+        if (obj === null || obj === undefined) throw new Error("cannot set property on null");
+        if (typeof obj !== "object") throw new Error("cannot set property on non-object");
+        obj[node.prop] = value;
+        return;
       }
-      if (node.finallyBody) await runFinally(node.finallyBody, env);
-      return;
-    }
-    case "On": {
-      if (!TCS_PERMS.dom) throw new Error("Security Error: 'on' handler requires DOM permission.");
-      const els = document.querySelectorAll(node.selector);
-      if (els.length === 0) throw new Error("'on " + node.event + " for " + node.selector + "': no matching element");
-      const body = node.body, capturedEnv = env;
-      els.forEach(el => {
-        el.addEventListener(node.event, async () => {
-          const handlerEnv = new Env(capturedEnv);
-          try { for (const s of body) await exec(s, handlerEnv); } 
-          catch (e) {
-            if (isSignal(e)) {
-              const which = e[SIGNAL_RETURN] !== undefined ? "return" : e[SIGNAL_BREAK] !== undefined ? "break" : "continue";
-              console.error("[TCS] '" + which + "' outside loop/function in event handler");
-              return;
-            }
-            console.error("[TCS] event handler error:", e.message);
+      case "SetIndex": {
+        const obj = await evalExpr(node.obj, env);
+        const idx = await evalExpr(node.index, env);
+        const value = await evalExpr(node.value, env);
+        if (obj === null || obj === undefined) throw new Error("cannot index undefined");
+        obj[idx] = value;
+        return;
+      }
+      case "If": {
+        const c = await evalExpr(node.cond, env);
+        if (typeof c !== "boolean") throw new Error("if condition must be boolean");
+        const branch = c ? node.then : node.otherwise;
+        if (branch) for (const s of branch) await exec(s, env);
+        return;
+      }
+      case "While": {
+        while (true) {
+          const c = await evalExpr(node.cond, env);
+          if (typeof c !== "boolean") throw new Error("while condition must be boolean");
+          if (!c) break;
+          const loopEnv = new Env(env);
+          try {
+            for (const s of node.body) await exec(s, loopEnv);
+          } catch (e) {
+            if (e && e[SIGNAL_BREAK] !== undefined) break;
+            if (e && e[SIGNAL_CONTINUE] !== undefined) continue;
+            throw e;
           }
+        }
+        return;
+      }
+      case "Until": {
+        let loops = 0;
+        while (true) {
+          loops++;
+          if (loops > 1000000) throw new Error("Infinite loop detected in until");    
+          const c = await evalExpr(node.cond, env);
+          if (typeof c !== "boolean") throw new Error("until condition must be boolean");
+          if (c) break;   
+          const loopEnv = new Env(env);
+          try {
+            for (const s of node.body) await exec(s, loopEnv);
+          } catch (e) {
+            if (e && e[SIGNAL_BREAK] !== undefined) break;
+            if (e && e[SIGNAL_CONTINUE] !== undefined) continue;
+            throw e;
+          }
+        }
+        return;
+      }
+      case "For": {
+        const a = await evalExpr(node.start, env);
+        const b = await evalExpr(node.end, env);
+        for (let i = a; i < b; i++) {
+          const child = new Env(env);
+          child.declare(node.name, i);
+          try {
+            for (const s of node.body) await exec(s, child);
+          } catch (e) {
+            if (e && e[SIGNAL_BREAK] !== undefined) break;
+            if (e && e[SIGNAL_CONTINUE] !== undefined) continue;
+            throw e;
+          }
+        }
+        return;
+      }
+      case "Fn": {
+        FUNCS[node.name] = { params: node.params, body: node.body, closure: env };
+        return;
+      }
+      case "Return": throw { [SIGNAL_RETURN]: node.value ? await evalExpr(node.value, env) : 0 };
+      case "Throw": throw new Error(String(await evalExpr(node.value, env)));
+      case "Break": throw { [SIGNAL_BREAK]: true };
+      case "Continue": throw { [SIGNAL_CONTINUE]: true };
+      case "Try": {
+        let threw = false, caughtError = null;
+        try { for (const s of node.body) await exec(s, env); } 
+        catch (e) {
+          if (isSignal(e)) { if (node.finallyBody) await runFinally(node.finallyBody, env); throw e; }
+          if (!node.catchBody) { if (node.finallyBody) await runFinally(node.finallyBody, env); throw e; }
+          threw = true; caughtError = e;
+        }
+        if (threw) {
+          const catchEnv = new Env(env);
+          const msg = (caughtError && caughtError.message !== undefined) ? String(caughtError.message) : String(caughtError);
+          catchEnv.declare(node.catchName, msg);
+          try { for (const s of node.catchBody) await exec(s, catchEnv); } 
+          catch (e) { if (node.finallyBody) await runFinally(node.finallyBody, env); throw e; }
+        }
+        if (node.finallyBody) await runFinally(node.finallyBody, env);
+        return;
+      }
+      case "On": {
+        if (!TCS_PERMS.dom) throw new Error("Security Error: 'on' handler requires DOM permission.");
+        const els = document.querySelectorAll(node.selector);
+        if (els.length === 0) throw new Error("'on " + node.event + " for " + node.selector + "': no matching element");
+        const body = node.body, capturedEnv = env;
+        els.forEach(el => {
+          el.addEventListener(node.event, async () => {
+            const handlerEnv = new Env(capturedEnv);
+            try { for (const s of body) await exec(s, handlerEnv); } 
+            catch (e) {
+              if (isSignal(e)) {
+                const which = e[SIGNAL_RETURN] !== undefined ? "return" : e[SIGNAL_BREAK] !== undefined ? "break" : "continue";
+                console.error("[TCS] '" + which + "' outside loop/function in event handler");
+                return;
+              }
+              console.error("[TCS] event handler error:", e.message);
+            }
+          });
         });
-      });
-      return;
+        return;
+      }
+      case "ExprStmt": await evalExpr(node.expr, env); return;
+      default: throw new Error("unknown statement: " + node.type);
     }
-    case "ExprStmt": await evalExpr(node.expr, env); return;
-    default: throw new Error("unknown statement: " + node.type);
+  } catch (e) {
+    if (e && !e.line && node.line) e.line = node.line;
+    throw e;
   }
 }
 
 async function evalExpr(node, env) {
   if (node === undefined || node === null) return undefined;
-  
-  switch (node.type) {
-    case "Undefined": return undefined;
-    case "Null": return null;
-    case "NaN": return NaN;
-    case "Number": return node.value;
-    case "String": return node.value;
-    case "Version": return "TCS_JS_6";
-    case "Info":    return "TCS_JS_6/JS_Eruda/JS_E2026/MIT/BUILD_9";
-    case "Template": {
-  const parts = node.value.split(/\$\{([^}]+)\}/);
-  let result = "";
-  for (let i = 0; i < parts.length; i++) {
-    if (i % 2 === 0) {
-      result += parts[i];
-    } else {
-      const exprCode = parts[i];
-      const tokens = tokenize(exprCode);
-      const exprAst = parse(tokens).body[0].expr;
-      result += String(await evalExpr(exprAst, env));
-    }
-  }
-  return result;
-}
-    case "Bool":   return node.value;
-    case "Array":  return Promise.all(node.elements.map(e => evalExpr(e, env)));
-    case "Ident":  return env.get(node.name);
-    case "Member": {
-      const o = await evalExpr(node.obj, env);
-      if (o === null || o === undefined) throw new Error("cannot read property '" + node.prop + "' of null");
-      if (node.prop === "clientY") return o.clientY;
-      if (node.prop === "clientX") return o.clientX;
-      return o[node.prop];
-    }
+  try {
+    switch (node.type) {
+      case "Undefined": return undefined;
+      case "Null": return null;
+      case "NaN": return NaN;
+      case "Number": return node.value;
+      case "String": return node.value;
+      case "Version": return "TCS_JS_6";
+      case "Info":    return "TCS_JS_6/JS_Eruda/JS_E2026/MIT/BUILD_9";
+      case "Template": {
+        const parts = node.value.split(/\$\{([^}]+)\}/);
+        let result = "";
+        for (let i = 0; i < parts.length; i++) {
+          if (i % 2 === 0) {
+            result += parts[i];
+          } else {
+            const exprCode = parts[i];
+            const tokens = tokenize(exprCode);
+            const exprAst = parse(tokens).body[0].expr;
+            result += String(await evalExpr(exprAst, env));
+          }
+        }
+        return result;
+      }
+      case "Bool":   return node.value;
+      case "Array":  return Promise.all(node.elements.map(e => evalExpr(e, env)));
+      case "Ident":  return env.get(node.name);
+      case "Member": {
+        const o = await evalExpr(node.obj, env);
+        if (o === null || o === undefined) throw new Error("cannot read property '" + node.prop + "' of null");
+        if (node.prop === "clientY") return o.clientY;
+        if (node.prop === "clientX") return o.clientX;
+        return o[node.prop];
+      }
+      case "Index": {
+        const o = await evalExpr(node.obj, env);
+        const i = await evalExpr(node.index, env);
+        if (o === null || o === undefined) throw new Error("cannot index undefined");
+        if (typeof o === "string") { 
+            if (i < 0 || i >= o.length) throw new Error("index out of bounds"); 
+            return o[i]; 
+        }  
+        if (!Array.isArray(o)) {
+            return o[i]; 
+        }
+        if (i < 0 || i >= o.length) throw new Error("index out of bounds");
+        return o[i];
+      }
+      case "Object": {
+        const obj = {};
+        for (let i = 0; i < node.properties.length; i++) {
+          const key = node.properties[i].key;
+          const value = await evalExpr(node.properties[i].value, env);
+          obj[key] = value;
+        }
+        return obj;
+      }
+      case "Ternary": {
+        const cond = await evalExpr(node.cond, env);
+        if (cond) return await evalExpr(node.then, env);
+        else return await evalExpr(node.else, env);
+      }
+      case "TypeOf": {
+        const val = await evalExpr(node.expr, env);
+        if (Array.isArray(val)) return "array";
+        return typeof val;
+      }
+      case "Unary": {
+        const v = await evalExpr(node.expr, env);
+        if (node.op === "-") return -v;
+        if (node.op === "!") return !v;
+        throw new Error("unknown unary op");
+      }
+      case "Binary": {
+        const l = await evalExpr(node.left, env);
+        if (node.op === "&&") return l ? await evalExpr(node.right, env) : false;
+        if (node.op === "||") return l ? true : await evalExpr(node.right, env);
+        const r = await evalExpr(node.right, env);
+        if (node.op === "/" && (typeof l === "string" || typeof r === "string")) return String(l) + String(r);
+        switch (node.op) {
+          case "+": return l + r;
+          case "-": return l - r;
+          case "*": return l * r;
+          case "/": return Math.trunc(l / r);
+          case "%": return l % r;
+          case "==": return l === r;
+          case "!=": return l !== r;
+          case "<":  return l <  r;
+          case ">":  return l >  r;
+          case "<=": return l <= r;
+          case ">=": return l >= r;
+        }
+        throw new Error("unknown op " + node.op);
+      }
+      case "Call": {
+        const name = node.callee.type === "Ident" ? node.callee.name : null;
+        const args = await Promise.all(node.args.map(a => evalExpr(a, env)));
     
-    case "Index": {
-      const o = await evalExpr(node.obj, env);
-      const i = await evalExpr(node.index, env);
-      if (o === null || o === undefined) throw new Error("cannot index undefined");
-      if (typeof o === "string") { 
-          if (i < 0 || i >= o.length) throw new Error("index out of bounds"); 
-          return o[i]; 
-      }  
-      if (!Array.isArray(o)) {
-          return o[i]; 
-      }
-      if (i < 0 || i >= o.length) throw new Error("index out of bounds");
-      return o[i];
-    }
-    case "Object": {
-      const obj = {};
-      for (let i = 0; i < node.properties.length; i++) {
-        const key = node.properties[i].key;
-        const value = await evalExpr(node.properties[i].value, env);
-        obj[key] = value;
-      }
-      return obj;
-    }
-    case "Ternary": {
-      const cond = await evalExpr(node.cond, env);
-      if (cond) return await evalExpr(node.then, env);
-      else return await evalExpr(node.else, env);
-    }
-    case "TypeOf": {
-      const val = await evalExpr(node.expr, env);
-      if (Array.isArray(val)) return "array";
-      return typeof val;
-    }
-    case "Unary": {
-      const v = await evalExpr(node.expr, env);
-      if (node.op === "-") return -v;
-      if (node.op === "!") return !v;
-      throw new Error("unknown unary op");
-    }
-    case "Binary": {
-      const l = await evalExpr(node.left, env);
-      if (node.op === "&&") return l ? await evalExpr(node.right, env) : false;
-      if (node.op === "||") return l ? true : await evalExpr(node.right, env);
-      const r = await evalExpr(node.right, env);
-      if (node.op === "/" && (typeof l === "string" || typeof r === "string")) return String(l) + String(r);
-      switch (node.op) {
-        case "+": return l + r;
-        case "-": return l - r;
-        case "*": return l * r;
-        case "/": return Math.trunc(l / r);
-        case "%": return l % r;
-        case "==": return l === r;
-        case "!=": return l !== r;
-        case "<":  return l <  r;
-        case ">":  return l >  r;
-        case "<=": return l <= r;
-        case ">=": return l >= r;
-      }
-      throw new Error("unknown op " + node.op);
-    }
-    case "Call": {
-      const name = node.callee.type === "Ident" ? node.callee.name : null;
-      const args = await Promise.all(node.args.map(a => evalExpr(a, env)));
-  
- if (name && TCS_PERMS.blacklist.includes(name)) {
-        throw new Error("Security Error: '" + name + "' is blocked by the host.");
-      }
-      if (name && needsCFN.includes(name) && !TCS_PERMS.cfn) {
-  throw new Error("Security Error: '" + name + "' requires CFN permission.");
-}
-      if (name && needsNetwork.includes(name) && !TCS_PERMS.network) {
-        throw new Error(`Security Error: '${name}' requires Network permission.`);
-      }
-      if (name && needsDOM.includes(name) && !TCS_PERMS.dom) {
-        throw new Error(`Security Error: '${name}' requires DOM permission.`);
-      }
-      if (name && needsStorage.includes(name) && !TCS_PERMS.storage) {
-        throw new Error(`Security Error: '${name}' requires Storage permission.`);
-      }
-      if (name && needsSystem.includes(name) && !TCS_PERMS.system) {
-        throw new Error(`Security Error: '${name}' requires System permission.`);
-      }
-      if (name && js.includes(name) && !TCS_PERMS.js) {
-        throw new Error(`Security Error: '${name}' requires JavaScript (js) permission.`);
-      }
-      
-      if (name && FUNCS[name]) {
-        const fn = FUNCS[name];
-        
-        if (typeof fn === "function") {
-          return await fn(...args);
+        if (name && TCS_PERMS.blacklist.includes(name)) {
+          throw new Error("Security Error: '" + name + "' is blocked by the host.");
+        }
+        if (name && needsCFN.includes(name) && !TCS_PERMS.cfn) {
+          throw new Error("Security Error: '" + name + "' requires CFN permission.");
+        }
+        if (name && needsNetwork.includes(name) && !TCS_PERMS.network) {
+          throw new Error(`Security Error: '${name}' requires Network permission.`);
+        }
+        if (name && needsDOM.includes(name) && !TCS_PERMS.dom) {
+          throw new Error(`Security Error: '${name}' requires DOM permission.`);
+        }
+        if (name && needsStorage.includes(name) && !TCS_PERMS.storage) {
+          throw new Error(`Security Error: '${name}' requires Storage permission.`);
+        }
+        if (name && needsSystem.includes(name) && !TCS_PERMS.system) {
+          throw new Error(`Security Error: '${name}' requires System permission.`);
+        }
+        if (name && js.includes(name) && !TCS_PERMS.js) {
+          throw new Error(`Security Error: '${name}' requires JavaScript (js) permission.`);
         }
         
-        const child = new Env(fn.closure);
-        for (let i = 0; i < fn.params.length; i++) child.declare(fn.params[i], args[i]);
-        try {
-          for (const s of fn.body) await exec(s, child);
-          return 0;
-        } catch (e) {
-          if (e && e[SIGNAL_RETURN] !== undefined) return e[SIGNAL_RETURN];
-          if (e && e[SIGNAL_BREAK] !== undefined) throw new Error("'break' outside loop");
-          if (e && e[SIGNAL_CONTINUE] !== undefined) throw new Error("'continue' outside loop");
-          throw e;
+        if (name && FUNCS[name]) {
+          const fn = FUNCS[name];
+          if (typeof fn === "function") {
+            return await fn(...args);
+          }
+          const child = new Env(fn.closure);
+          for (let i = 0; i < fn.params.length; i++) child.declare(fn.params[i], args[i]);
+          try {
+            for (const s of fn.body) await exec(s, child);
+            return 0;
+          } catch (e) {
+            if (e && e[SIGNAL_RETURN] !== undefined) return e[SIGNAL_RETURN];
+            if (e && e[SIGNAL_BREAK] !== undefined) throw new Error("'break' outside loop");
+            if (e && e[SIGNAL_CONTINUE] !== undefined) throw new Error("'continue' outside loop");
+            throw e;
+          }
         }
+        throw new Error("'" + (name || "?") + "' is not a function");
       }
-
-      throw new Error("'" + (name || "?") + "' is not a function");
+      default: throw new Error("unknown expression: " + node.type);
     }
-    default: throw new Error("unknown expression: " + node.type);
+  } catch (e) {
+    if (e && !e.line && node.line) e.line = node.line;
+    throw e;
   }
 }
 
@@ -1541,7 +1687,10 @@ async function RunTCS(code, perms = {}) {
     if (e && e[SIGNAL_RETURN] !== undefined) return { ok: false, error: "'return' outside function" };
     if (e && e[SIGNAL_BREAK] !== undefined) return { ok: false, error: "'break' outside loop" };
     if (e && e[SIGNAL_CONTINUE] !== undefined) return { ok: false, error: "'continue' outside loop" };
-    return { ok: false, error: e.message };
+    
+    let errMsg = e.message || String(e);
+    if (e.line) errMsg += " at line " + e.line;
+    return { ok: false, error: errMsg };
   }
 }
 
@@ -1586,9 +1735,11 @@ if (typeof window !== "undefined") {
   });
 }
 function AddFN(name, fn, perms) {
+    if (!TCS_PERMS.cfn) throw new Error("AddFN: CFN(cfn) permission is required to add custom functions");
     if (typeof name !== "string") throw new Error("AddFN: name must be a string");
-    if (typeof fn !== "function") throw new Error("AddFN: fn must be a function");    
-    FUNCS[name] = fn;    
+    if (typeof fn !== "function") throw new Error("AddFN: fn must be a function");
+    FUNCS[name] = fn;
+    if (!needsCFN.includes(name)) needsCFN.push(name);
     if (perms && Array.isArray(perms)) {
         perms.forEach(p => {
             if (p === "dom" && !needsDOM.includes(name)) needsDOM.push(name);
@@ -1599,5 +1750,3 @@ function AddFN(name, fn, perms) {
         });
     }
 }
-
-window.AddFN = AddFN;
