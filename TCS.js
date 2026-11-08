@@ -1,11 +1,12 @@
-const TCS_VERSION = "6.9.2";
-const TCS_SERIES  = "8";
-const TCS_BUILD   = "17";
+const TCS_VERSION = "7.0.0";
+const TCS_SERIES  = "9";
+const TCS_BUILD   = "18";
 
 const needsDOM = [
   "changeBodyCSS", "query", "queryAll", "setText", "setHTML", "setValue", "setStyle", 
   "show", "hide", "changePageTitle", "runHyperTextMarkupLanguage", "getValue", "changeTitle", 
-  "openLink", "reloadPage", "copyToClipboard", "requstCurrentLoctationClosing", "makeTag", "getTagContent"
+  "openLink", "reloadPage", "copyToClipboard", "requstCurrentLoctationClosing", "makeTag", 
+  "getTagContent", "getAttribute", "createElement", "getElementById"
 ];
 const needsStorage = ["saveData", "loadData", "deleteData", "wipeAllCurrentWebsiteData", "wipeTCSData"];
 const needsSystem = [
@@ -593,7 +594,10 @@ FUNCS.getInfo = function(key) {
     if (typeof tcs !== "undefined") return tcs[key] || "Unknown";
     return "Unknown";
 };
-
+FUNCS.createElement = function(tagName) {
+    if (typeof tagName !== "string") throw new Error("createElement: tagName must be a string");
+    return document.createElement(tagName);
+};
 FUNCS.upper = function(s) {
     if (s === undefined || s === null) throw new Error("upper: expected a string");
     return String(s).toUpperCase();
@@ -636,7 +640,83 @@ FUNCS.ws_send = function(id, message) {
     ws.send(String(message));
     return 0;
 };
+FUNCS.sin = function(n) {
+    if (typeof n !== "number") throw new Error("sin: expected a number");
+    return Math.sin(n);
+};
 
+FUNCS.cos = function(n) {
+    if (typeof n !== "number") throw new Error("cos: expected a number");
+    return Math.cos(n);
+};
+
+FUNCS.tan = function(n) {
+    if (typeof n !== "number") throw new Error("tan: expected a number");
+    return Math.tan(n);
+};
+
+FUNCS.asin = function(n) {
+    if (typeof n !== "number") throw new Error("asin: expected a number");
+    return Math.asin(n);
+};
+
+FUNCS.acos = function(n) {
+    if (typeof n !== "number") throw new Error("acos: expected a number");
+    return Math.acos(n);
+};
+
+FUNCS.atan = function(n) {
+    if (typeof n !== "number") throw new Error("atan: expected a number");
+    return Math.atan(n);
+};
+
+FUNCS.atan2 = function(y, x) {
+    if (typeof y !== "number" || typeof x !== "number") throw new Error("atan2: expected two numbers");
+    return Math.atan2(y, x);
+};
+
+FUNCS.log = function(n) {
+    if (typeof n !== "number") throw new Error("log: expected a number");
+    if (n <= 0) throw new Error("log: argument must be positive");
+    return Math.log(n);
+};
+
+FUNCS.log10 = function(n) {
+    if (typeof n !== "number") throw new Error("log10: expected a number");
+    if (n <= 0) throw new Error("log10: argument must be positive");
+    return Math.log10(n);
+};
+
+FUNCS.exp = function(n) {
+    if (typeof n !== "number") throw new Error("exp: expected a number");
+    return Math.exp(n);
+};
+
+FUNCS.cbrt = function(n) {
+    if (typeof n !== "number") throw new Error("cbrt: expected a number");
+    return Math.cbrt(n);
+};
+
+FUNCS.sign = function(n) {
+    if (typeof n !== "number") throw new Error("sign: expected a number");
+    return Math.sign(n);
+};
+
+FUNCS.trunc = function(n) {
+    if (typeof n !== "number") throw new Error("trunc: expected a number");
+    return Math.trunc(n);
+};
+
+FUNCS.PI = Math.PI;
+FUNCS.E = Math.E;
+FUNCS.createElement = function(tagName) {
+    if (typeof tagName !== "string") throw new Error("createElement: tagName must be a string");
+    return document.createElement(tagName);
+};
+FUNCS.getElementById = function(id) {
+    if (typeof id !== "string") throw new Error("getElementById: id must be a string");
+    return document.getElementById(id);
+};
 FUNCS.ws_close = function(id) {
     const ws = TCS_SOCKETS[id];
     if (ws) {
