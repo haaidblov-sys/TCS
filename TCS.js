@@ -1,12 +1,13 @@
-const TCS_VERSION = "7.0.0";
-const TCS_SERIES  = "9";
-const TCS_BUILD   = "18";
-
+const TCS_VERSION = "7.2.0";
+const TCS_SERIES  = "11";
+const TCS_BUILD   = "20";
 const needsDOM = [
   "changeBodyCSS", "query", "queryAll", "setText", "setHTML", "setValue", "setStyle", 
   "show", "hide", "changePageTitle", "runHyperTextMarkupLanguage", "getValue", "changeTitle", 
-  "openLink", "reloadPage", "copyToClipboard", "requstCurrentLoctationClosing", "makeTag", 
-  "getTagContent", "getAttribute", "createElement", "getElementById"
+  "openLink", "reloadCurrentWebPage", "copyToClipboard", "requstCurrentLoctationClosing", "makeTag", 
+  "getTagContent", "getAttribute", "createElement", "getElementById", "setKey",
+  "load3D", "add3D", "run3D", "loadModel3D", "setTexture3D", "applyPhysics3D", "addLight3D", "addText3D", "notify",
+  "getProp", "setProp"
 ];
 const needsStorage = ["saveData", "loadData", "deleteData", "wipeAllCurrentWebsiteData", "wipeTCSData"];
 const needsSystem = [
@@ -16,11 +17,13 @@ const needsSystem = [
 ];
 const needsNetwork = [
   "fetchText", "fetchFn", "fetchTCSFn", "XTHttpsRequest", "fetchJSON", 
-  "ws_connect", "ws_send", "ws_close", "loadJavaScriptTCSFunction"
+  "ws_connect", "ws_send", "ws_close", "loadJavaScriptTCSFunction",
+  "FBInit", "FBAdd", "FBGet", "FBWatch", "FBUpdate", "FBInc", "FBDelete",
+  "FBQuery", "FBSignUp", "FBSignIn", "FBAnon", "FBSignOut", "FBUser",
+  "FBRtdbSet", "FBRtdbGet", "FBRtdbUpdate", "FBRtdbPush", "FBRtdbDelete", "FBRtdbWatch", "fetchVal"
 ];
 const js = ["callJS", "javaScriptRunCodeAsText"];
 const needsCFN = [];
-
 const tcs = {
   version: "TCS_JS_" + TCS_SERIES,
   full_version: TCS_VERSION,
@@ -30,7 +33,6 @@ const tcs = {
   build: TCS_BUILD,
   info: "TCS_JS_" + TCS_SERIES + "/JS_Eruda/JS_E2026/MIT" + "/B_" + TCS_BUILD + "/V_" + TCS_SERIES + "/FV_" + TCS_VERSION + "/AST"
 };
-
 function tokenize(src) {
   src = src.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&"); 
   const tokens = [];
@@ -39,19 +41,27 @@ function tokenize(src) {
   const isDigit = c => c >= '0' && c <= '9';
   const isAlpha = c => /[a-zA-Z_]/.test(c);
   const isAlphaNum = c => isAlpha(c) || isDigit(c);
-  
+  const isHex = c => /[0-9a-fA-F]/.test(c);
   while (i < src.length) {
     const c = src[i];
     if (/\s/.test(c)) { 
       if (c === '\n') line++;
       i++; continue; 
     }
-
     if (c === '/' && src[i+1] === '/') {
       while (i < src.length && src[i] !== '\n') i++;
       continue;
     }
-
+if (c === 'r' && src[i+1] === '"') {
+  i += 2;
+  let s = "";
+  while (i < src.length && src[i] !== '"') {
+    s += src[i++];
+  }
+  i++;
+  tokens.push({ type: "STRING", value: s, line: line });
+  continue;
+}
     if (c === '"') {
       i++;
       let s = "";
@@ -60,12 +70,19 @@ function tokenize(src) {
           const next = src[i + 1];
           if (next === '"')  { s += '"';  i += 2; continue; }
           if (next === "'")  { s += "'";  i += 2; continue; }
-          if (next === '/')  { s += '/';  i += 2; continue; } 
+          if (next === '/')  { s += '/';  i += 2; continue; }
           if (next === 'n')  { s += '\n'; i += 2; continue; }
           if (next === 't')  { s += '\t'; i += 2; continue; }
           if (next === 'r')  { s += '\r'; i += 2; continue; }
           if (next === '0')  { s += '\0'; i += 2; continue; }
           if (next === '\\') { s += '\\'; i += 2; continue; }
+          if (next === 'u' && i + 5 < src.length) {
+            const hex = src.substr(i + 2, 4);
+            if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+              s += String.fromCharCode(parseInt(hex, 16));
+              i += 6; continue;
+            }
+          }
         }
         if (src[i] === '\n') line++;
         s += src[i++];
@@ -75,7 +92,6 @@ function tokenize(src) {
       tokens.push({ type: "STRING", value: s, line: line });
       continue;
     }
-
     if (c === "'") {
       i++;
       let s = "";
@@ -84,7 +100,7 @@ function tokenize(src) {
           const next = src[i + 1];
           if (next === "'")  { s += "'";  i += 2; continue; }
           if (next === '"')  { s += '"';  i += 2; continue; }
-          if (next === '/')  { s += '/';  i += 2; continue; }  
+          if (next === '/')  { s += '/';  i += 2; continue; }
           if (next === 'n')  { s += '\n'; i += 2; continue; }
           if (next === 't')  { s += '\t'; i += 2; continue; }
           if (next === 'r')  { s += '\r'; i += 2; continue; }
@@ -99,7 +115,6 @@ function tokenize(src) {
       tokens.push({ type: "STRING", value: s, line: line });
       continue;
     }
-
     if (c === '`') {
       i++;
       let s = "";
@@ -120,28 +135,46 @@ function tokenize(src) {
       tokens.push({ type: "TEMPLATE", value: s, line: line });
       continue;
     }
-
     if (isDigit(c)) {
       let n = "";
+      if (c === '0' && src[i + 1] === 'x') {
+        n = "0x";
+        i += 2;
+        while (i < src.length && isHex(src[i])) n += src[i++];
+        tokens.push({ type: "NUMBER", value: parseInt(n, 16), line: line });
+        continue;
+      }
       while (i < src.length && isDigit(src[i])) n += src[i++];
-      tokens.push({ type: "NUMBER", value: parseInt(n, 10), line: line });
+      if (src[i] === '.' && isDigit(src[i + 1])) {
+        n += src[i++];
+        while (i < src.length && isDigit(src[i])) n += src[i++];
+      }
+      if (src[i] === 'e' || src[i] === 'E') {
+        const eStart = i;
+        i++;
+        if (src[i] === '+' || src[i] === '-') i++;
+        if (isDigit(src[i])) {
+          n += src.substr(eStart, i - eStart);
+          while (i < src.length && isDigit(src[i])) n += src[i++];
+        } else {
+          i = eStart;
+        }
+      }
+      tokens.push({ type: "NUMBER", value: parseFloat(n), line: line });
       continue;
     }
-
     if (isAlpha(c)) {
       let w = "";
       while (i < src.length && isAlphaNum(src[i])) w += src[i++];
       tokens.push({ type: "WORD", value: w, line: line });
       continue;
     }
-
     const two = src.substr(i, 2);
     if (["==", "!=", "<=", ">=", "&&", "||", ".."].includes(two)) {
       tokens.push({ type: "OP", value: two, line: line });
       i += 2;
       continue;
     }
-
     if ("+-*/%<>()[]{},;.!?:=".includes(c)) {
       tokens.push({ type: "OP", value: c, line: line });
       i++;
@@ -152,7 +185,6 @@ function tokenize(src) {
   tokens.push({ type: "EOF", line: line });
   return tokens;
 }
-
 function parse(tokens) {
   let pos = 0;
   const peek = () => tokens[pos] || { type: "EOF", line: 0 };
@@ -162,11 +194,9 @@ function parse(tokens) {
     if (!at(t, v)) throw new Error("Expected " + (v || t) + ", got '" + peek().value + "' at line " + peek().line);
     return eat();
   };
-
   function node(type, props) {
     return { type, line: peek().line, ...props };
   }
-
   function parseProgram() {
     const body = [];
     while (!at("EOF")) {
@@ -175,22 +205,53 @@ function parse(tokens) {
     }
     return node("Program", { body });
   }
-
   function parseStatement() {
     if (at("WORD", "let")) return parseLet(false);
     if (at("WORD", "const")) return parseLet(true);
     if (at("WORD", "import")) return parseImport();
     if (at("WORD", "if"))  return parseIf();
+    if (at("WORD", "dojs")) {
+  eat();
+  expect("OP", "{");
+  let jsCode = "";
+  while (!at("OP", "}") && !at("EOF")) {
+    let tok = eat();
+    if (tok.type === "STRING") jsCode += '"' + tok.value + '" ';
+    else if (tok.type === "NUMBER") jsCode += tok.value + ' ';
+    else jsCode += tok.value + ' ';
+  }
+  expect("OP", "}");
+  return node("DoJS", { code: jsCode.trim() });
+}
+if (at("WORD", "jsfn")) {
+  eat();
+  const name = expect("WORD").value;
+  expect("OP", "(");
+  const params = [];
+  while (!at("OP", ")")) {
+    params.push(expect("WORD").value);
+    if (at("OP", ",")) eat(); else break;
+  }
+  expect("OP", ")");
+  expect("OP", "{");
+  let jsCode = "";
+  while (!at("OP", "}") && !at("EOF")) {
+    let tok = eat();
+    if (tok.type === "STRING") jsCode += '"' + tok.value + '" ';
+    else if (tok.type === "NUMBER") jsCode += tok.value + ' ';
+    else jsCode += tok.value + ' ';
+  }
+  expect("OP", "}");
+  return node("JSFn", { name: name, params: params, code: jsCode.trim() });
+}
     if (at("WORD", "switch")) {
       eat();
       expect("OP", "(");
       const expr = parseExpression();
       expect("OP", ")");
       expect("OP", "{");
-      
       const cases = [];
       let defaultCase = null;
-
       while (!at("OP", "}") && !at("EOF")) {
         if (at("WORD", "case")) {
           eat();
@@ -242,7 +303,6 @@ function parse(tokens) {
       if (at("OP", ";")) eat();
       return node("Return", { value: v });
     }
-
     const expr = parseExpression();
     if (at("OP", "=")) {
       eat();
@@ -266,7 +326,6 @@ function parse(tokens) {
     if (at("OP", ";")) eat();
     return node("ExprStmt", { expr });
   }
-
   function parseImport() {
     expect("WORD", "import");
     const url = expect("STRING").value;
@@ -278,7 +337,6 @@ function parse(tokens) {
     if (at("OP", ";")) eat();
     return node("Import", { url, alias });
   }
-
   function parseLet(isConst) {
     eat(); 
     let declared = null;
@@ -300,7 +358,6 @@ function parse(tokens) {
     if (at("OP", ";")) eat();
     return node("Let", { name, value, declared, isConst });
   }
-
   function parseOn() {
     expect("WORD", "on");
     const event = expect("STRING").value;
@@ -311,7 +368,6 @@ function parse(tokens) {
     expect("OP", "}");
     return node("On", { event, selector, body });
   }
-
   function parseIf() {
     expect("WORD", "if");
     const cond = parseExpression();
@@ -330,7 +386,6 @@ function parse(tokens) {
     }
     return node("If", { cond, then, otherwise });
   }
-
   function parseWhile() {
     expect("WORD", "while");
     const cond = parseExpression();
@@ -339,7 +394,6 @@ function parse(tokens) {
     expect("OP", "}");
     return node("While", { cond, body });
   }
-
   function parseFor() {
     expect("WORD", "for");
     const name = expect("WORD").value;
@@ -352,7 +406,6 @@ function parse(tokens) {
     expect("OP", "}");
     return node("For", { name, start, end, body });
   }
-
   function parseFn() {
     expect("WORD", "fn");
     const name = expect("WORD").value;
@@ -368,7 +421,6 @@ function parse(tokens) {
     expect("OP", "}");
     return node("Fn", { name, params, body });
   }
-
   function parseTry() {
     expect("WORD", "try");
     expect("OP", "{");
@@ -391,14 +443,12 @@ function parse(tokens) {
     if (!catchBody && !finallyBody) throw new Error("try: needs 'catch' or 'finally' at line " + peek().line);
     return node("Try", { body, catchName, catchBody, finallyBody });
   }
-
   function parseThrow() {
     expect("WORD", "throw");
     const value = parseExpression();
     if (at("OP", ";")) eat();
     return node("Throw", { value });
   }
-
   function parseBlock() {
     const stmts = [];
     while (!at("OP", "}") && !at("EOF")) {
@@ -407,7 +457,6 @@ function parse(tokens) {
     }
     return stmts;
   }
-
   function parseExpression() {
     let expr = parseOr();
     if (at("OP", "?")) {
@@ -419,7 +468,6 @@ function parse(tokens) {
     }
     return expr;
   }
-
   function parseOr() {
     let l = parseAnd();
     while (at("OP", "||")) { const op = eat().value; l = node("Binary", { op, left:l, right:parseAnd() }); }
@@ -457,7 +505,6 @@ function parse(tokens) {
     if (at("OP","!")) { eat(); return node("Unary", { op:"!", expr:parseUnary() }); }
     return parsePostfix();
   }
-  
   function parsePostfix(baseExpr) {
     let e = baseExpr || parsePrimary();
     while (true) {
@@ -480,26 +527,21 @@ function parse(tokens) {
     }
     return e;
   }
-
   function parsePrimary() {
     if (at("NUMBER")) return node("Number", { value: eat().value });
     if (at("STRING")) return node("String", { value: eat().value });
     if (at("TEMPLATE")) return node("Template", { value: eat().value });
-    
     if (at("WORD","true"))  { eat(); return node("Bool", { value:true  }); }
     if (at("WORD","false")) { eat(); return node("Bool", { value:false }); }
     if (at("WORD", "undefined")) { eat(); return node("Undefined", {}); }
     if (at("WORD", "null"))      { eat(); return node("Null", {}); }
     if (at("WORD", "NaN"))       { eat(); return node("NaN", {}); }
-    
     if (at("WORD", "typeof")) {
       eat();
       const expr = parseUnary();
       return node("TypeOf", { expr });
     }
-    
     if (at("OP","(")) { eat(); const e = parseExpression(); expect("OP",")"); return e; }
-    
     if (at("OP","[")) {
       eat();
       const el = [];
@@ -507,7 +549,6 @@ function parse(tokens) {
       expect("OP","]");
       return node("Array", { elements:el });
     }
-
     if (at("OP", "{")) {
       eat();
       const properties = [];
@@ -522,7 +563,6 @@ function parse(tokens) {
       expect("OP", "}");
       return node("Object", { properties });
     }
-
     if (at("WORD")) {
         let ident = node("Ident", { name: eat().value });
         return parsePostfix(ident);
@@ -531,32 +571,27 @@ function parse(tokens) {
   }
   return parseProgram();
 }
-
 class Env {
   constructor(parent=null) { 
     this.vars = new Map(); 
     this.consts = new Set();
     this.parent = parent; 
   }
-  
   get(n) {
     if (this.vars.has(n)) return this.vars.get(n);
     if (this.parent) return this.parent.get(n);
     throw new Error("'" + n + "' is not defined");
   }
-  
   has(n) {
     if (this.vars.has(n)) return true;
     if (this.parent) return this.parent.has(n);
     return false;
   }
-  
   declare(n, v, isConst) {
     if (this.vars.has(n)) throw new Error("'" + n + "' already declared");
     this.vars.set(n, v);
     if (isConst) this.consts.add(n);
   }
-  
   set(n, v) {
     if (this.consts.has(n)) throw new Error("Cannot reassign constant '" + n + "'");
     if (this.vars.has(n)) { this.vars.set(n, v); return; }
@@ -564,29 +599,25 @@ class Env {
     throw new Error("'" + n + "' not declared");
   }
 }
-
 const FUNCS = {};
 let TCS_PERMS = { dom: false, storage: false, system: false, js: false, network: false, cfn: false, blacklist: [] };
 const TCS_SOCKETS = {};
-
-FUNCS.console_log = function(text) { console.log(text); return 0; };
-FUNCS.console_error = function(text) { console.error(text); return 0; };
-FUNCS.console_warn = function(text) { console.warn(text); return 0; };
-FUNCS.console_time = function(label) { console.time(label); return 0; };
+["log", "error", "warn", "time", "timeLog", "timeEnd"].forEach(m => {
+    FUNCS["console_" + m] = (t) => {
+        if (t === undefined && m.startsWith("time")) throw new Error("console_" + m + ": label is required");
+        console[m](t);
+        return 0;
+    };
+});
 FUNCS.urlEncode = function(s) {
     if (typeof s !== "string") throw new Error("urlEncode: expected a string");
     return encodeURIComponent(s);
 };
-FUNCS.console_timeEnd = function(label) {
-    if (typeof label !== "string") throw new Error("console_timeEnd: label must be a string");
-    console.timeEnd(label); return 0;
-};
-FUNCS.console_timeLog = function(label) {
-    if (typeof label !== "string") throw new Error("console_timeLog: label must be a string");
-    console.timeLog(label); return 0;
-};
+FUNCS.TCS_Tokenize = function(src) {
+    if (typeof src !== "string") throw new Error("urlEncode: expected a string");
+	return tokenize(src);
+	}
 FUNCS.console_clear = function() { console.clear(); return 0; };
-
 FUNCS.getInfo = function(key) {
     if (key === undefined) throw new Error("getInfo: key is not defined");
     if (typeof key !== "string") throw new Error("getInfo: key is not a string");
@@ -614,7 +645,6 @@ FUNCS.len = function(s) {
     if (s === undefined || s === null) throw new Error("len: expected a string or array");
     return Array.isArray(s) ? s.length : String(s).length;
 };
-
 FUNCS.ws_connect = function(url, onMessageFnName, onOpenFnName, onCloseFnName) {
     if (typeof url !== "string") throw new Error("ws_connect: URL must be a string");
     const ws = new WebSocket(url);
@@ -632,7 +662,6 @@ FUNCS.ws_connect = function(url, onMessageFnName, onOpenFnName, onCloseFnName) {
     };
     return id;
 };
-
 FUNCS.ws_send = function(id, message) {
     const ws = TCS_SOCKETS[id];
     if (!ws) throw new Error("ws_send: invalid or closed socket ID");
@@ -644,71 +673,81 @@ FUNCS.sin = function(n) {
     if (typeof n !== "number") throw new Error("sin: expected a number");
     return Math.sin(n);
 };
-
+FUNCS.setKey = function(keyCode, isPressed) {
+    if (typeof keyCode !== "string") throw new Error("setKey: keyCode must be a string");
+    _tcs3d.keys[keyCode] = isPressed;
+    return 0;
+};
 FUNCS.cos = function(n) {
     if (typeof n !== "number") throw new Error("cos: expected a number");
     return Math.cos(n);
 };
-
 FUNCS.tan = function(n) {
     if (typeof n !== "number") throw new Error("tan: expected a number");
     return Math.tan(n);
 };
-
 FUNCS.asin = function(n) {
     if (typeof n !== "number") throw new Error("asin: expected a number");
     return Math.asin(n);
 };
-
 FUNCS.acos = function(n) {
     if (typeof n !== "number") throw new Error("acos: expected a number");
     return Math.acos(n);
 };
-
 FUNCS.atan = function(n) {
     if (typeof n !== "number") throw new Error("atan: expected a number");
     return Math.atan(n);
 };
-
 FUNCS.atan2 = function(y, x) {
     if (typeof y !== "number" || typeof x !== "number") throw new Error("atan2: expected two numbers");
     return Math.atan2(y, x);
 };
-
 FUNCS.log = function(n) {
     if (typeof n !== "number") throw new Error("log: expected a number");
     if (n <= 0) throw new Error("log: argument must be positive");
     return Math.log(n);
 };
-
 FUNCS.log10 = function(n) {
     if (typeof n !== "number") throw new Error("log10: expected a number");
     if (n <= 0) throw new Error("log10: argument must be positive");
     return Math.log10(n);
 };
-
 FUNCS.exp = function(n) {
     if (typeof n !== "number") throw new Error("exp: expected a number");
     return Math.exp(n);
 };
-
 FUNCS.cbrt = function(n) {
     if (typeof n !== "number") throw new Error("cbrt: expected a number");
     return Math.cbrt(n);
 };
-
 FUNCS.sign = function(n) {
     if (typeof n !== "number") throw new Error("sign: expected a number");
     return Math.sign(n);
 };
-
 FUNCS.trunc = function(n) {
     if (typeof n !== "number") throw new Error("trunc: expected a number");
     return Math.trunc(n);
 };
-
 FUNCS.PI = Math.PI;
 FUNCS.E = Math.E;
+FUNCS.notify = function(title, body) {
+    if (typeof title !== "string") throw new Error("notify: title must be a string");
+    if (typeof body !== "string") body = "";
+    if (!("Notification" in window)) throw new Error("notify: Notifications not supported in this browser");
+    if (Notification.permission === "granted") {
+        new Notification(title, { body: body });
+        return 0;
+    }
+    if (Notification.permission !== "denied") {
+        Notification.requestPermission().then(permission => {
+            if (permission === "granted") {
+                new Notification(title, { body: body });
+            }
+        });
+        return 0;
+    }
+    throw new Error("notify: Notification permission denied");
+};
 FUNCS.createElement = function(tagName) {
     if (typeof tagName !== "string") throw new Error("createElement: tagName must be a string");
     return document.createElement(tagName);
@@ -788,7 +827,6 @@ FUNCS.endsWith = function(str, suffix) {
     if (typeof suffix !== "string") throw new Error("endsWith: suffix must be a string");
     return str.endsWith(suffix);
 };
-
 FUNCS.abs = function(n) {
     if (typeof n !== "number") throw new Error("abs: expected a number");
     return Math.abs(n);
@@ -857,7 +895,6 @@ FUNCS.randomItem = function(arr) {
     if (arr.length === 0) throw new Error("randomItem: array is empty");
     return arr[Math.floor(Math.random() * arr.length)];
 };
-
 FUNCS.push = function(arr, item) {
     if (!Array.isArray(arr)) throw new Error("push: expected array");
     arr.push(item);
@@ -925,7 +962,6 @@ FUNCS.splice = function(arr, start, deleteCount, ...items) {
     if (deleteCount === undefined) deleteCount = arr.length - start; 
     return Array.prototype.splice.call(arr, start, deleteCount, ...items);
 };
-
 FUNCS.slice = function(arr, start, end) {
     if (arr === null || arr === undefined) throw new Error("slice: expected array or array-like");
     if (!Array.isArray(arr) && typeof arr.length !== "number")
@@ -936,7 +972,6 @@ FUNCS.slice = function(arr, start, end) {
         throw new Error("slice: end must be a number");   
     return Array.prototype.slice.call(arr, start, end);
 };
-
 FUNCS.typeOf = function(val) {
     if (val === null) return "null";
     if (Array.isArray(val)) return "array";
@@ -959,14 +994,12 @@ FUNCS.regexReplace = function(str, pattern, replacement) {
     if (typeof replacement !== "string") throw new Error("regexReplace: replacement must be a string");
     return str.replace(new RegExp(pattern, "g"), replacement);
 };
-
 function validateURL(url, caller) {
     if (typeof url !== "string") throw new Error(caller + ": expected a URL string");
     if (!/^https?:\/\//i.test(url))
         throw new Error(caller + ": URL must start with http:// or https://");
     return url;
 }
-
 FUNCS.fetchText = async function(url) {
     validateURL(url, "fetchText");
     try {
@@ -978,6 +1011,7 @@ FUNCS.fetchText = async function(url) {
     }
 };
 FUNCS.fetchJSON = async function(url) {
+		if(typeof url !== "string") throw new Error("fetchVal: url must be string");
     validateURL(url, "fetchJSON");
     try {
         const response = await fetch(url);
@@ -987,7 +1021,21 @@ FUNCS.fetchJSON = async function(url) {
         throw new Error("fetchJSON failed: " + e.message);
     }
 };
+FUNCS.fetchVal = async function(url, val) {
+	if(typeof url !== "string") throw new Error("fetchVal: url must be string");
+		if(typeof val !== "string") throw new Error("fetchVal: val must be string");
+    validateURL(url, "fetchVal");
+    try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        if(typeof response[val] !== "function") throw new Error("fetchVal: val must be string");
+        return await response[val]();
+    } catch (e) {
+        throw new Error("fetchVal failed: " + e.message);
+    }
+};
 FUNCS.fetchTCSFn = async function(url) {
+		if(typeof url !== "string") throw new Error("fetchVal: url must be string");
     validateURL(url, "fetchTCSFn");
     try {
         const response = await fetch(url);
@@ -1001,6 +1049,7 @@ FUNCS.fetchTCSFn = async function(url) {
     }
 };
 FUNCS.fetchFn = async function(url) {
+		if(typeof url !== "string") throw new Error("fetchVal: url must be string")
     validateURL(url, "fetchFn");
     return new Promise((resolve, reject) => {
         const script = document.createElement("script");
@@ -1027,7 +1076,6 @@ FUNCS.XTHttpsRequest = function(method, url, body) {
         if (body) xhr.send(body); else xhr.send();
     });
 };
-
 FUNCS.saveData = function(key, value) {
     if (typeof key !== "string") throw new Error("saveData: key must be a string");
     localStorage.setItem("tcs_" + key, String(value));
@@ -1051,7 +1099,6 @@ FUNCS.wipeTCSData = function() {
     }
     return 0;
 };
-
 FUNCS.now = function() { return Date.now(); };
 FUNCS.getYear = function() { return new Date().getFullYear(); };
 FUNCS.getMonth = function() { return new Date().getMonth() + 1; };
@@ -1087,7 +1134,6 @@ FUNCS.setInterval = function(fnName, ms) {
     }
     throw new Error("setInterval: '" + fnName + "' is not a function");
 };
-
 FUNCS.query = function(selector) {
     if (typeof selector !== "string") throw new Error("query: selector must be a string");
     return document.querySelector(selector);
@@ -1180,13 +1226,12 @@ FUNCS.openLink = function(url) {
     window.open(url, "_blank");
     return 0;
 };
-FUNCS.reloadPage = function() { window.location.reload(); return 0; };
+FUNCS.reloadCurrentWebPage = function() { window.location.reload(); return 0; };
 FUNCS.copyToClipboard = function(text) {
     if (typeof text !== "string") throw new Error("copyToClipboard: text must be a string");
     navigator.clipboard.writeText(text).catch(e => console.error("Copy failed:", e));
     return 0;
 };
-
 FUNCS.alert = function(msg) {
     if (typeof window === "undefined" || typeof window.alert !== "function") throw new Error("alert: not available");
     window.alert(String(msg));
@@ -1200,7 +1245,6 @@ FUNCS.confirm = function(msg) {
     if (typeof window === "undefined" || typeof window.confirm !== "function") throw new Error("confirm: not available");
     return window.confirm(String(msg));
 };
-
 FUNCS.callJS = function(fnName, ...args) {
     if (!TCS_PERMS.js) throw new Error("Security Error: callJS requires 'js' permission");
     if (typeof fnName !== "string") throw new Error("callJS: fnName must be a string");
@@ -1237,12 +1281,315 @@ FUNCS.requstCurrentLoctationClosing = function() {
     }, 100);
     return 0;
 };
-
+let _fb = { 
+  app: null, db: null, auth: null, rtdb: null, 
+  ready: false, 
+  mod: null, authMod: null, rtdbMod: null 
+};
+FUNCS.FBInit = async function(config, rtdbUrl) {
+    try {
+        const appMod = await import("https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js");
+        const dbMod = await import("https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js");
+        const authMod = await import("https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js");
+        const rtdbMod = await import("https://www.gstatic.com/firebasejs/12.19.0/firebase-database.js");
+        _fb.mod = dbMod;
+        _fb.authMod = authMod;
+        _fb.rtdbMod = rtdbMod;
+        _fb.app = appMod.initializeApp(config);
+        _fb.db = dbMod.getFirestore(_fb.app);
+        _fb.auth = authMod.getAuth(_fb.app);
+        if (rtdbUrl) _fb.rtdb = rtdbMod.getDatabase(_fb.app, rtdbUrl);
+        _fb.ready = true;
+        return 0;
+    } catch (e) {
+        throw new Error("FBInit failed: " + e.message);
+    }
+};
+FUNCS.FBAdd = async function(col, data) {
+    if (!_fb.ready) throw new Error("FBAdd: call FBInit first");
+    const ref = await _fb.mod.addDoc(_fb.mod.collection(_fb.db, col), data);
+    return ref.id;
+};
+FUNCS.FBGet = async function(col, n) {
+    if (!_fb.ready) throw new Error("FBGet: call FBInit first");
+    const q = n ? _fb.mod.query(_fb.mod.collection(_fb.db, col), _fb.mod.limit(n)) : _fb.mod.collection(_fb.db, col);
+    const snap = await _fb.mod.getDocs(q);
+    const out = [];
+    snap.forEach(d => out.push({ id: d.id, ...d.data() }));
+    return out;
+};
+FUNCS.FBWatch = function(col, callbackName, n) {
+    if (!_fb.ready) throw new Error("FBWatch: call FBInit first");
+    const q = n ? _fb.mod.query(_fb.mod.collection(_fb.db, col), _fb.mod.limit(n)) : _fb.mod.collection(_fb.db, col);
+    return _fb.mod.onSnapshot(q, (snap) => {
+        const out = [];
+        snap.forEach(d => out.push({ id: d.id, ...d.data() }));
+        const fn = FUNCS[callbackName];
+        if (fn && fn.body) {
+            const child = new Env(fn.closure);
+            child.declare(fn.params[0], out);
+            (async () => { for (const s of fn.body) await exec(s, child); })();
+        }
+    });
+};
+FUNCS.FBUpdate = async function(col, id, data) {
+    await _fb.mod.updateDoc(_fb.mod.doc(_fb.db, col, id), data);
+    return 0;
+};
+FUNCS.FBInc = async function(col, id, field, amt) {
+    await _fb.mod.updateDoc(_fb.mod.doc(_fb.db, col, id), { [field]: _fb.mod.increment(amt || 1) });
+    return 0;
+};
+FUNCS.FBDelete = async function(col, id) {
+    await _fb.mod.deleteDoc(_fb.mod.doc(_fb.db, col, id));
+    return 0;
+};
+FUNCS.FBQuery = async function(col, field, op, value, sortField, sortDir, max) {
+    if (!_fb.ready) throw new Error("FBQuery: call FBInit first");
+    let constraints = [];
+    if (field && op && value !== undefined) {
+        let ops = {
+            "==": "==", "!=": "!=", ">": ">", "<": "<", ">=": ">=", "<=": "<=",
+            "array-contains": "array-contains", "in": "in", "not-in": "not-in"
+        };
+        if (!ops[op]) throw new Error("FBQuery: unknown op '" + op + "'");
+        constraints.push(_fb.mod.where(field, ops[op], value));
+    }
+    if (sortField) {
+        constraints.push(_fb.mod.orderBy(sortField, sortDir === "desc" ? "desc" : "asc"));
+    }
+    if (max) {
+        constraints.push(_fb.mod.limit(max));
+    }
+    const q = _fb.mod.query(_fb.mod.collection(_fb.db, col), ...constraints);
+    const snap = await _fb.mod.getDocs(q);
+    const out = [];
+    snap.forEach(d => out.push({ id: d.id, ...d.data() }));
+    return out;
+};
+FUNCS.FBSignUp = async function(email, password) {
+    try {
+        const user = await _fb.authMod.createUserWithEmailAndPassword(_fb.auth, email, password);
+        return user.user.uid;
+    } catch (e) {
+        throw new Error("FBSignUp: " + e.message);
+    }
+};
+FUNCS.FBSignIn = async function(email, password) {
+    try {
+        const user = await _fb.authMod.signInWithEmailAndPassword(_fb.auth, email, password);
+        return user.user.uid;
+    } catch (e) {
+        throw new Error("FBSignIn: " + e.message);
+    }
+};
+FUNCS.FBAnon = async function() {
+    try {
+        const user = await _fb.authMod.signInAnonymously(_fb.auth);
+        return user.user.uid;
+    } catch (e) {
+        throw new Error("FBAnon: " + e.message);
+    }
+};
+FUNCS.FBSignOut = async function() {
+    await _fb.authMod.signOut(_fb.auth);
+    return 0;
+};
+FUNCS.FBUser = function() {
+    if (!_fb.auth || !_fb.auth.currentUser) return null;
+    return {
+        uid: _fb.auth.currentUser.uid,
+        email: _fb.auth.currentUser.email,
+        anon: _fb.auth.currentUser.isAnonymous
+    };
+};
+FUNCS.FBRtdbSet = async function(path, value) {
+    if (!_fb.rtdb) throw new Error("FBRtdbSet: Realtime DB not enabled");
+    await _fb.rtdbMod.set(_fb.rtdbMod.ref(_fb.rtdb, path), value);
+    return 0;
+};
+FUNCS.FBRtdbGet = async function(path) {
+    if (!_fb.rtdb) throw new Error("FBRtdbGet: Realtime DB not enabled");
+    const snap = await _fb.rtdbMod.get(_fb.rtdbMod.ref(_fb.rtdb, path));
+    return snap.exists() ? snap.val() : null;
+};
+FUNCS.FBRtdbUpdate = async function(path, value) {
+    if (!_fb.rtdb) throw new Error("FBRtdbUpdate: Realtime DB not enabled");
+    await _fb.rtdbMod.update(_fb.rtdbMod.ref(_fb.rtdb, path), value);
+    return 0;
+};
+FUNCS.FBRtdbPush = async function(path, value) {
+    if (!_fb.rtdb) throw new Error("FBRtdbPush: Realtime DB not enabled");
+    const ref = _fb.rtdbMod.push(_fb.rtdbMod.ref(_fb.rtdb, path), value);
+    return ref.key;
+};
+FUNCS.FBRtdbDelete = async function(path) {
+    if (!_fb.rtdb) throw new Error("FBRtdbDelete: Realtime DB not enabled");
+    await _fb.rtdbMod.remove(_fb.rtdbMod.ref(_fb.rtdb, path));
+    return 0;
+};
+FUNCS.FBRtdbWatch = function(path, callbackName) {
+    if (!_fb.rtdb) throw new Error("FBRtdbWatch: Realtime DB not enabled");
+    _fb.rtdbMod.onValue(_fb.rtdbMod.ref(_fb.rtdb, path), (snap) => {
+        const val = snap.exists() ? snap.val() : null;
+        const fn = FUNCS[callbackName];
+        if (fn && fn.body) {
+            const child = new Env(fn.closure);
+            child.declare(fn.params[0], val);
+            (async () => { for (const s of fn.body) await exec(s, child); })();
+        }
+    });
+    return 0;
+};
 FUNCS.getCanvas = function(id) {
     if (typeof id !== "string") throw new Error("getCanvas: id must be a string");
     const canvas = document.getElementById(id);
     if (!canvas) throw new Error("getCanvas: no element with id '" + id + "'");
     return canvas.getContext("2d");
+};
+let _tcs3d = { scene: null, camera: null, renderer: null, objects: {}, clock: null, mixer: null, animations: {} };
+FUNCS.load3D = async function(canvasId, bgColor) {
+    if (!TCS_PERMS.network) throw new Error("Security Error: 'load3D' requires Network permission.");
+    if (typeof canvasId !== "string") throw new Error("load3D: canvasId must be a string");
+    if (typeof THREE === "undefined") {
+        await new Promise((resolve, reject) => {
+            const script = document.createElement("script");
+            script.src = "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js";
+            script.onload = resolve;
+            script.onerror = () => reject(new Error("load3D: Failed to load Three.js"));
+            document.head.appendChild(script);
+        });
+    }
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) throw new Error("load3D: Canvas not found");
+    _tcs3d.scene = new THREE.Scene();
+    _tcs3d.scene.background = new THREE.Color(bgColor || 0x111111);
+    _tcs3d.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    _tcs3d.camera.position.set(0, 0, 5);
+    _tcs3d.renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+    _tcs3d.renderer.setSize(window.innerWidth, window.innerHeight);
+    _tcs3d.renderer.shadowMap.enabled = true;
+    _tcs3d.clock = new THREE.Clock();
+    _tcs3d.mixer = new THREE.AnimationMixer(_tcs3d.scene);
+    window.addEventListener("resize", () => {
+        _tcs3d.camera.aspect = window.innerWidth / window.innerHeight;
+        _tcs3d.camera.updateProjectionMatrix();
+        _tcs3d.renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+    return 0;
+};
+FUNCS.add3D = function(type, id, x, y, z, a, b, c, color) {
+    if (!_tcs3d.scene) throw new Error("add3D: call load3D first");
+    const mat = new THREE.MeshStandardMaterial({ color: color || 0x00ffcc });
+    let geo;
+    if (type === "cube") geo = new THREE.BoxGeometry(a, b, c);
+    else if (type === "sphere") geo = new THREE.SphereGeometry(a, 32, 32);
+    else throw new Error("add3D: unknown type " + type);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(x, y, z);
+    mesh.castShadow = true; 
+    mesh.receiveShadow = true;
+    _tcs3d.scene.add(mesh);
+    _tcs3d.objects[id] = mesh;
+    if (!_tcs3d.light) {
+        _tcs3d.light = new THREE.DirectionalLight(0xffffff, 1);
+        _tcs3d.light.position.set(5, 5, 5);
+        _tcs3d.scene.add(_tcs3d.light);
+        _tcs3d.scene.add(new THREE.AmbientLight(0x404040));
+    }
+    return 0;
+};
+FUNCS.run3D = function(id, rotX, rotY, rotZ) {
+    if (!_tcs3d.renderer) throw new Error("run3D: call load3D first");
+    if (id && _tcs3d.objects[id]) {
+        const obj = _tcs3d.objects[id];
+        if (rotX) obj.rotation.x += rotX;
+        if (rotY) obj.rotation.y += rotY;
+        if (rotZ) obj.rotation.z += rotZ;
+        if (_tcs3d.physics && _tcs3d.physics[id]) {
+            const p = _tcs3d.physics[id];
+            p.velocityY += p.gravity;
+            obj.position.y += p.velocityY;
+            if (obj.position.y < 0) {
+                obj.position.y = 0;
+                p.velocityY = -p.velocityY * p.bounce;
+            }
+        }
+    }
+    _tcs3d.mixer.update(_tcs3d.clock.getDelta());
+    _tcs3d.renderer.render(_tcs3d.scene, _tcs3d.camera);
+    return 0;
+};
+FUNCS.loadModel3D = async function(id, url, x, y, z, scale) {
+    if (!_tcs3d.scene) throw new Error("loadModel3D: call load3D first");
+    const loader = new THREE.GLTFLoader();
+    return new Promise((resolve, reject) => {
+        loader.load(url, (gltf) => {
+            const model = gltf.scene;
+            model.position.set(x, y, z);
+            if (scale) model.scale.set(scale, scale, scale);
+            model.traverse((child) => {
+                if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
+            });
+            _tcs3d.scene.add(model);
+            _tcs3d.objects[id] = model;
+            if (gltf.animations && gltf.animations.length > 0) {
+                _tcs3d.animations[id] = _tcs3d.mixer.clipAction(gltf.animations[0]);
+                _tcs3d.animations[id].play();
+            }
+            resolve(0);
+        }, undefined, (e) => reject(new Error("loadModel3D failed: " + e)));
+    });
+};
+FUNCS.setTexture3D = function(id, url) {
+    if (!_tcs3d.objects[id]) throw new Error("setTexture3D: object not found");
+    const textureLoader = new THREE.TextureLoader();
+    textureLoader.load(url, (texture) => {
+        const mesh = _tcs3d.objects[id];
+        if (mesh.material) {
+            mesh.material.map = texture;
+            mesh.material.needsUpdate = true;
+        }
+    });
+    return 0;
+};
+FUNCS.applyPhysics3D = function(id, gravity, bounce) {
+    if (!_tcs3d.objects[id]) throw new Error("applyPhysics3D: object not found");
+    if (!_tcs3d.physics) _tcs3d.physics = {};
+    _tcs3d.physics[id] = {
+        velocityY: 0,
+        gravity: gravity || -0.01,
+        bounce: bounce || 0.8
+    };
+    return 0;
+};
+FUNCS.addLight3D = function(type, x, y, z, color, intensity) {
+    if (!_tcs3d.scene) throw new Error("addLight3D: call load3D first");
+    let light;
+    const col = new THREE.Color(color || 0xffffff);
+    if (type === "point") light = new THREE.PointLight(col, intensity || 1);
+    else if (type === "spot") light = new THREE.SpotLight(col, intensity || 1);
+    else light = new THREE.DirectionalLight(col, intensity || 1);
+    light.position.set(x, y, z);
+    light.castShadow = true;
+    _tcs3d.scene.add(light);
+    return 0;
+};
+FUNCS.addText3D = function(text, x, y, z, size, color) {
+    if (!_tcs3d.scene) throw new Error("addText3D: call load3D first");
+    if (typeof THREE.FontLoader === "undefined") throw new Error("addText3D: FontLoader not loaded");
+    const loader = new THREE.FontLoader();
+    loader.load('https://threejs.org/examples/fonts/helvetiker_regular.typeface.json', function (font) {
+        const geometry = new THREE.TextGeometry(text, {
+            font: font, size: size || 1, height: 0.2,
+        });
+        const material = new THREE.MeshStandardMaterial({ color: color || 0xffffff });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.set(x, y, z);
+        _tcs3d.scene.add(mesh);
+        _tcs3d.objects["text_" + text] = mesh;
+    });
+    return 0;
 };
 FUNCS.obj_keys = function(obj) {
     if (obj === null || typeof obj !== "object") throw new Error("keys: expected object");
@@ -1311,6 +1658,26 @@ FUNCS.clearCanvas = function(ctx) {
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     return 0;
 };
+FUNCS.saveJSON = function(key, value) {
+    if (typeof key !== "string") throw new Error("saveJSON: key must be a string");
+    if (value === undefined) throw new Error("saveJSON: value is required");
+    try {
+        localStorage.setItem("tcs_" + key, JSON.stringify(value));
+        return 0;
+    } catch (e) {
+        throw new Error("saveJSON: " + e.message);
+    }
+};
+FUNCS.loadJSON = function(key) {
+    if (typeof key !== "string") throw new Error("loadJSON: key must be a string");
+    const val = localStorage.getItem("tcs_" + key);
+    if (val === null) return null;
+    try {
+        return JSON.parse(val);
+    } catch (e) {
+        throw new Error("loadJSON: stored data is not valid JSON");
+    }
+};
 FUNCS.runHyperTextMarkupLanguage = function(html) {
     if (typeof html !== "string") throw new Error("runHTML: html must be a string");
     const container = document.createElement("div");
@@ -1318,14 +1685,12 @@ FUNCS.runHyperTextMarkupLanguage = function(html) {
     document.body.appendChild(container);
     return 0;
 };
-
 FUNCS.runTCS = async function(code, perms) {
     if (typeof code !== "string") throw new Error("runTCS: expected a string of code");
     const result = await RunTCS(code, perms || TCS_PERMS);
     if (!result.ok) throw new Error("runTCS Error: " + result.error);
     return 0;
 };
-
 let currentAudio = null;
 FUNCS.playAudio = function(url) {
     if (typeof Audio === "undefined") throw new Error("playAudio: not in a browser");
@@ -1348,19 +1713,30 @@ FUNCS.getAttribute = function(el, attrName) {
     if (typeof attrName !== "string") throw new Error("getAttribute: attrName must be a string");
     return el.getAttribute(attrName) || "";
 };
+FUNCS.getProp = function(target, prop) {
+    const el = typeof target === "string" ? document.querySelector(target) : target;
+    if (!el) throw new Error("getProp: no element matches '" + target + "'");
+    if (typeof prop !== "string") throw new Error("getProp: prop must be a string");
+    return el[prop];
+};
+
+FUNCS.setProp = function(target, prop, value) {
+    const el = typeof target === "string" ? document.querySelector(target) : target;
+    if (!el) throw new Error("setProp: no element matches '" + target + "'");
+    if (typeof prop !== "string") throw new Error("setProp: prop must be a string");
+    el[prop] = value;
+    return 0;
+};
 FUNCS.readFromLocalFileStorage = function(callbackFnName) {
     if (typeof callbackFnName !== "string") {
         throw new Error("readFromLocalFileStorage: expected a TCS function name");
     }
-
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".txt,.json,.csv,.tcs,.md";
-    
     input.onchange = (event) => {
         const file = event.target.files[0];
         if (!file) return;
-        
         const reader = new FileReader();
         reader.onload = (e) => {
             const content = e.target.result;
@@ -1380,7 +1756,6 @@ FUNCS.readFromLocalFileStorage = function(callbackFnName) {
         };
         reader.readAsText(file);
     };
-
     input.click();
     return 0;
 };
@@ -1388,7 +1763,6 @@ FUNCS.saveToLocalFileStorage = function(content, mimeType, fileName) {
     if (typeof content !== "string") throw new Error("saveToLocalFileStorage: content must be a string");
     if (typeof mimeType !== "string") mimeType = "text/plain";
     if (typeof fileName !== "string") fileName = "tcs_TextFile.txt";
-
     const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     try {
@@ -1406,19 +1780,37 @@ FUNCS.saveToLocalFileStorage = function(content, mimeType, fileName) {
 };
 FUNCS.pauseAudio = function() { if (currentAudio) currentAudio.pause(); return 0; };
 FUNCS.resumeAudio = function() { if (currentAudio) currentAudio.play(); return 0; };
-
 const SIGNAL_RETURN = "__return";
 const SIGNAL_BREAK = "__break";
 const SIGNAL_SWITCH_BREAK = "__switch_break";
 const SIGNAL_CONTINUE = "__continue";
-
 function isSignal(e) {
   return e && (e[SIGNAL_RETURN] !== undefined || e[SIGNAL_BREAK] !== undefined || e[SIGNAL_CONTINUE] !== undefined);
 }
-
 async function runFinally(body, env) { for (const s of body) await exec(s, env); }
 async function run(ast, env) { for (const stmt of ast.body) await exec(stmt, env); }
-
+function evalMathFast(node, env) {
+  if (node.type === "Number") return node.value;
+  if (node.type === "Ident") return env.get(node.name);
+  if (node.type === "Binary") {
+    const l = evalMathFast(node.left, env);
+    const r = evalMathFast(node.right, env);
+    switch (node.op) {
+      case "+": return l + r;
+      case "-": return l - r;
+      case "*": return l * r;
+      case "/": return Math.trunc(l / r);
+      case "%": return l % r;
+      case "==": return l === r;
+      case "!=": return l !== r;
+      case "<": return l < r;
+      case ">": return l > r;
+      case "<=": return l <= r;
+      case ">=": return l >= r;
+    }
+  }
+  return null;
+}
 async function exec(node, env) {
   try {
     switch (node.type) {
@@ -1484,21 +1876,60 @@ async function exec(node, env) {
         return;
       }
       case "While": {
-        while (true) {
-          const c = await evalExpr(node.cond, env);
-          if (typeof c !== "boolean") throw new Error("while condition must be boolean");
-          if (!c) break;
-          const loopEnv = new Env(env);
-          try {
-            for (const s of node.body) await exec(s, loopEnv);
-          } catch (e) {
-            if (e && e[SIGNAL_BREAK] !== undefined) break;
-            if (e && e[SIGNAL_CONTINUE] !== undefined) continue;
-            throw e;
-          }
-        }
-        return;
+  while (true) {
+    let fastCond = evalMathFast(node.cond, env);
+    let c;
+    if (fastCond !== null) {
+      c = fastCond;
+    } else {
+      c = await evalExpr(node.cond, env);
+    }
+    if (typeof c !== "boolean") throw new Error("while condition must be boolean");
+    if (!c) break;
+    const loopEnv = new Env(env);
+    try {
+      for (const s of node.body) await exec(s, loopEnv);
+    } catch (e) {
+      if (e && e[SIGNAL_BREAK] !== undefined) break;
+      if (e && e[SIGNAL_CONTINUE] !== undefined) continue;
+      throw e;
+    }
+  }
+  return;
+}
+case "For": {
+  let fastStart = evalMathFast(node.start, env);
+  let fastEnd = evalMathFast(node.end, env);
+  if (fastStart !== null && fastEnd !== null) {
+    for (let i = fastStart; i < fastEnd; i++) {
+      const child = new Env(env);
+      child.declare(node.name, i);
+      try {
+        for (const s of node.body) exec(s, child);
+      } catch (e) {
+        if (e && e[SIGNAL_BREAK] !== undefined) break;
+        if (e && e[SIGNAL_CONTINUE] !== undefined) continue;
+        throw e;
       }
+    }
+  } else {
+    const a = await evalExpr(node.start, env);
+    const b = await evalExpr(node.end, env);
+    for (let i = a; i < b; i++) {
+      const child = new Env(env);
+      child.declare(node.name, i);
+      try {
+        for (const s of node.body) await exec(s, child);
+      } catch (e) {
+        if (e && e[SIGNAL_BREAK] !== undefined) break;
+        if (e && e[SIGNAL_CONTINUE] !== undefined) continue;
+        throw e;
+      }
+    }
+  }
+  return;
+}
+
       case "Until": {
         let loops = 0;
         while (true) {
@@ -1518,22 +1949,43 @@ async function exec(node, env) {
         }
         return;
       }
-      case "For": {
-        const a = await evalExpr(node.start, env);
-        const b = await evalExpr(node.end, env);
-        for (let i = a; i < b; i++) {
-          const child = new Env(env);
-          child.declare(node.name, i);
-          try {
-            for (const s of node.body) await exec(s, child);
-          } catch (e) {
-            if (e && e[SIGNAL_BREAK] !== undefined) break;
-            if (e && e[SIGNAL_CONTINUE] !== undefined) continue;
-            throw e;
-          }
-        }
-        return;
+      case "DoJS": {
+  if (!TCS_PERMS.js) throw new Error("Security Error: 'dojs' requires 'js' permission.");
+  try {
+    const fn = new Function("env", "TCS", node.code);
+    const TCS = {
+      get: (n) => env.has(n) ? env.get(n) : undefined,
+      set: (n, v) => {
+        if (env.has(n)) env.set(n, v);
+        else env.declare(n, v);
       }
+    };
+    fn(env, TCS);
+  } catch (e) {
+    throw new Error("dojs error: " + e.message);
+  }
+  return;
+}
+case "JSFn": {
+  if (!TCS_PERMS.js) throw new Error("Security Error: 'jsfn' requires 'js' permission.");
+  try {
+    const fnStr = "function(env, TCS, " + node.params.join(", ") + ") { " + node.code + " }";
+    const fn = new Function("return " + fnStr)();
+    FUNCS[node.name] = async function(...args) {
+      const TCS = {
+        get: (n) => env.has(n) ? env.get(n) : undefined,
+        set: (n, v) => {
+          if (env.has(n)) env.set(n, v);
+          else env.declare(n, v);
+        }
+      };
+      return await fn(env, TCS, ...args);
+    };
+  } catch (e) {
+    throw new Error("jsfn error: " + e.message);
+  }
+  return;
+}
       case "Fn": {
         FUNCS[node.name] = { params: node.params, body: node.body, closure: env };
         return;
@@ -1589,7 +2041,6 @@ async function exec(node, env) {
     throw e;
   }
 }
-
 async function evalExpr(node, env) {
   if (node === undefined || node === null) return undefined;
   try {
@@ -1689,7 +2140,6 @@ async function evalExpr(node, env) {
       case "Call": {
         const name = node.callee.type === "Ident" ? node.callee.name : null;
         const args = await Promise.all(node.args.map(a => evalExpr(a, env)));
-    
         if (name && TCS_PERMS.blacklist.includes(name)) {
           throw new Error("Security Error: '" + name + "' is blocked by the host.");
         }
@@ -1711,7 +2161,6 @@ async function evalExpr(node, env) {
         if (name && js.includes(name) && !TCS_PERMS.js) {
           throw new Error(`Security Error: '${name}' requires JavaScript (js) permission.`);
         }
-        
         if (name && FUNCS[name]) {
           const fn = FUNCS[name];
           if (typeof fn === "function") {
@@ -1738,7 +2187,6 @@ async function evalExpr(node, env) {
     throw e;
   }
 }
-
 function checkType(v, declared, name) {
   const { base, arr } = declared;
   if (arr === true && !Array.isArray(v)) throw new Error("'" + name + "' must be an array");
@@ -1746,7 +2194,6 @@ function checkType(v, declared, name) {
   if (Array.isArray(v)) return;
   if (typeof v !== base) throw new Error("'" + name + "' must be " + base);
 }
-
 async function RunTCS(code, perms = {}) {
   TCS_PERMS = {
     dom: perms.dom === true,
@@ -1767,24 +2214,20 @@ async function RunTCS(code, perms = {}) {
     if (e && e[SIGNAL_RETURN] !== undefined) return { ok: false, error: "'return' outside function" };
     if (e && e[SIGNAL_BREAK] !== undefined) return { ok: false, error: "'break' outside loop" };
     if (e && e[SIGNAL_CONTINUE] !== undefined) return { ok: false, error: "'continue' outside loop" };
-    
     let errMsg = e.message || String(e);
     if (e.line) errMsg += " at line " + e.line;
     return { ok: false, error: errMsg };
   }
 }
-
 if (typeof window !== "undefined") {
   window.RunTCS = RunTCS;
   window.FUNCS = FUNCS;
-
   window.addEventListener("DOMContentLoaded", () => {
     document.querySelectorAll('script[type="text/tcs"]').forEach(script => {
       RunTCS(script.textContent, { dom: true, storage: true, system: true, js: true, network: true }).then(result => {
         if (!result.ok) console.error("TCS Script Error:", result.error);
       });
     });
-
     if (!customElements.get("tcs-run")) {
       class TCSElement extends HTMLElement {
         connectedCallback() {
@@ -1794,7 +2237,6 @@ if (typeof window !== "undefined") {
           const template = this.querySelector("template");
           if (template) code = template.innerHTML;
           else code = this.textContent;
-
           this.innerHTML = "";       
           RunTCS(code, { dom: true, storage: true, system: true, js: true, network: true}).then(result => {
             if (!result.ok) {
@@ -1805,7 +2247,6 @@ if (typeof window !== "undefined") {
         }
       }
       customElements.define("tcs-run", TCSElement);
-      
       setTimeout(() => {
         document.querySelectorAll("tcs-run").forEach(el => {
           if (!el.dataset.ran && el.connectedCallback) el.connectedCallback();
